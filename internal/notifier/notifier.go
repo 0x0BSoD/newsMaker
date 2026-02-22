@@ -22,12 +22,18 @@ type ArticleProvider interface {
 	MarkAsPosted(ctx context.Context, article model.Article) error
 }
 
+type SourcesProvider interface {
+	Sources(ctx context.Context) ([]model.Source, error)
+	SourceByID(ctx context.Context, id int64) (*model.Source, error)
+}
+
 type Summarizer interface {
 	Summarize(text string) (string, error)
 }
 
 type Notifier struct {
 	articles         ArticleProvider
+	sources          SourcesProvider
 	summarizer       Summarizer
 	bot              *tgbotapi.BotAPI
 	sendInterval     time.Duration
@@ -37,6 +43,7 @@ type Notifier struct {
 
 func New(
 	articleProvider ArticleProvider,
+	sourcesProvider SourcesProvider,
 	summarizer Summarizer,
 	bot *tgbotapi.BotAPI,
 	sendInterval time.Duration,
@@ -45,6 +52,7 @@ func New(
 ) *Notifier {
 	return &Notifier{
 		articles:         articleProvider,
+		sources:          sourcesProvider,
 		summarizer:       summarizer,
 		bot:              bot,
 		sendInterval:     sendInterval,
@@ -137,13 +145,16 @@ func cleanupText(text string) string {
 }
 
 func (n *Notifier) sendArticle(article model.Article, summary string) error {
-	const msgFormat = "*%s*%s\n\n%s"
+	const msgFormat = "*%s*%s\n\n%s\n\\#%s"
+
+	source, _ := n.sources.SourceByID(context.Background(), article.SourceID)
 
 	msg := tgbotapi.NewMessage(n.channelID, fmt.Sprintf(
 		msgFormat,
 		markup.EscapeForMarkdown(article.Title),
 		markup.EscapeForMarkdown(summary),
 		markup.EscapeForMarkdown(article.Link),
+		markup.EscapeForMarkdown(source.Name),
 	))
 	msg.ParseMode = "MarkdownV2"
 

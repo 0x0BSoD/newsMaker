@@ -56,6 +56,7 @@ func main() {
 		)
 		notifier = notifier.New(
 			articleStorage,
+			sourceStorage,
 			summarizer,
 			botAPI,
 			config.Get().NotificationInterval,
