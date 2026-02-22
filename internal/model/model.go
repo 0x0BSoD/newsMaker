@@ -1,3 +1,4 @@
+// Package model defines the data structures used in the newsMaker application, including Source, Item, and Article. These structures represent the sources of news, individual news items, and articles stored in the database, respectively.
 package model
 
 import "time"
@@ -24,7 +25,7 @@ type Article struct {
 	Title       string
 	Link        string
 	Summary     string
-	PublishedAt string
-	PostedAt    string
+	PublishedAt time.Time
+	PostedAt    time.Time
 	CreatedAt   time.Time
 }
