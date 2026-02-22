@@ -7,18 +7,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tomakado/containers/set"
+
 	"github.com/0x0BSoD/newsMaker/internal/model"
-	"github.com/0x0BSoD/newsMaker/internal/source"
+	src "github.com/0x0BSoD/newsMaker/internal/source"
 )
 
+//go:generate moq --out=mocks/mock_article_storage.go --pkg=mocks . ArticleStorage
 type ArticleStorage interface {
 	Store(ctx context.Context, article model.Article) error
 }
 
-type SourceProvider interface {
+//go:generate moq --out=mocks/mock_sources_provider.go --pkg=mocks . SourcesProvider
+type SourcesProvider interface {
 	Sources(ctx context.Context) ([]model.Source, error)
 }
 
+//go:generate moq --out=mocks/mock_source.go --pkg=mocks . Source
 type Source interface {
 	ID() int64
 	Name() string
@@ -27,21 +32,21 @@ type Source interface {
 
 type Fetcher struct {
 	articles ArticleStorage
-	sources  SourceProvider
+	sources  SourcesProvider
 
 	fetchInterval  time.Duration
 	filterKeywords []string
 }
 
 func New(
-	articles ArticleStorage,
-	sources SourceProvider,
+	articleStorage ArticleStorage,
+	sourcesProvider SourcesProvider,
 	fetchInterval time.Duration,
 	filterKeywords []string,
 ) *Fetcher {
 	return &Fetcher{
-		articles:       articles,
-		sources:        sources,
+		articles:       articleStorage,
+		sources:        sourcesProvider,
 		fetchInterval:  fetchInterval,
 		filterKeywords: filterKeywords,
 	}
@@ -68,6 +73,7 @@ func (f *Fetcher) Start(ctx context.Context) error {
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) error {
+	log.Printf("[INFO] Running Fetcher...")
 	sources, err := f.sources.Sources(ctx)
 	if err != nil {
 		return err
@@ -75,67 +81,38 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
-	for _, src := range sources {
+	for _, source := range sources {
+		log.Printf("[INFO] Checking source %s...", source.Name)
 		wg.Add(1)
 
-		rssSource := source.NewRSSSourceFromModel(src)
 		go func(source Source) {
 			defer wg.Done()
 
 			items, err := source.Fetch(ctx)
 			if err != nil {
-				log.Printf("[ERROR] failed to fetch items for source %d: %v", source.ID(), err)
+				log.Printf("[ERROR] failed to fetch items from source %q: %v", source.Name(), err)
 				return
 			}
+
 			if err := f.processItems(ctx, source, items); err != nil {
-				log.Printf("[ERROR] failed to process items for source %d: %v", source.ID(), err)
+				log.Printf("[ERROR] failed to process items from source %q: %v", source.Name(), err)
 				return
 			}
-		}(rssSource)
+		}(src.NewRSSSourceFromModel(source))
 	}
+
 	wg.Wait()
 
 	return nil
 }
 
-func makeSet(in []string) []string {
-	m := map[string]bool{}
-	var out []string
-	for _, v := range in {
-		if _, ok := m[v]; !ok {
-			m[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func setContains(this string, in []string) bool {
-	for _, v := range in {
-		if v == this {
-			return true
-		}
-	}
-	return false
-}
-
-func (f *Fetcher) itemMustSkipped(item model.Item) bool {
-	categoriesSet := makeSet(item.Categories)
-	for _, keyword := range f.filterKeywords {
-		titleContainsKeyword := strings.Contains(strings.ToLower(item.Title), keyword)
-		if setContains(keyword, categoriesSet) || titleContainsKeyword {
-			return true
-		}
-	}
-
-	return false
-}
-
 func (f *Fetcher) processItems(ctx context.Context, source Source, items []model.Item) error {
 	for _, item := range items {
-		item.Date = time.Now().UTC()
+		log.Printf("[INFO] Checking Item %s from source %s ...", item.Title, source.Name())
+		item.Date = item.Date.UTC()
 
-		if f.itemMustSkipped(item) {
+		if f.itemShouldBeSkipped(item) {
+			log.Printf("[INFO] item %q (%s) from source %q should be skipped", item.Title, item.Link, source.Name())
 			continue
 		}
 
@@ -149,5 +126,18 @@ func (f *Fetcher) processItems(ctx context.Context, source Source, items []model
 			return err
 		}
 	}
+
 	return nil
+}
+
+func (f *Fetcher) itemShouldBeSkipped(item model.Item) bool {
+	categoriesSet := set.New(item.Categories...)
+
+	for _, keyword := range f.filterKeywords {
+		if categoriesSet.Contains(keyword) || strings.Contains(strings.ToLower(item.Title), keyword) {
+			return true
+		}
+	}
+
+	return false
 }
