@@ -84,7 +84,7 @@ func (n *Notifier) Start(ctx context.Context) error {
 }
 
 func (n *Notifier) SelectAndSendArticle(ctx context.Context) error {
-	log.Printf("[INFO] Selecting Article")
+	log.Printf("[INFO] Selecting not posted Article")
 	topOneArticles, err := n.articles.AllNotPosted(ctx, time.Now().Add(-n.lookupTimeWindow), 1)
 	if err != nil {
 		return err

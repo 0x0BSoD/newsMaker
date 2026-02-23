@@ -3,13 +3,26 @@ package source
 
 import (
 	"context"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/SlyMarbo/rss"
 	"github.com/samber/lo"
 
 	"github.com/0x0BSoD/newsMaker/internal/model"
 )
+
+// contextTransport injects a context into every outgoing request so that
+// context cancellation and deadlines propagate through the rss library.
+type contextTransport struct {
+	ctx  context.Context
+	base http.RoundTripper
+}
+
+func (t contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.base.RoundTrip(req.WithContext(t.ctx))
+}
 
 type RSSSource struct {
 	URL        string
@@ -38,34 +51,27 @@ func (s RSSSource) Fetch(ctx context.Context) ([]model.Item, error) {
 			Link:       item.Link,
 			Date:       item.Date,
 			SourceName: s.SourceName,
-			Summary:    strings.TrimSpace(item.Summary),
+			Summary:    itemText(item),
 		}
 	}), nil
 }
 
-func (s RSSSource) loadFeed(ctx context.Context, url string) (*rss.Feed, error) {
-	var (
-		fetchCh = make(chan *rss.Feed)
-		errCh   = make(chan error)
-	)
-
-	go func() {
-		feed, err := rss.Fetch(url)
-		if err != nil {
-			errCh <- err
-			return
-		}
-		fetchCh <- feed
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case err := <-errCh:
-		return nil, err
-	case feed := <-fetchCh:
-		return feed, nil
+// itemText returns the richest available text for an item.
+// Content (full body) is preferred over Summary (short excerpt); falling back
+// to Summary avoids an extra HTTP fetch in the notifier for feeds that omit Content.
+func itemText(item *rss.Item) string {
+	if c := strings.TrimSpace(item.Content); c != "" {
+		return c
 	}
+	return strings.TrimSpace(item.Summary)
+}
+
+func (s RSSSource) loadFeed(ctx context.Context, url string) (*rss.Feed, error) {
+	client := &http.Client{
+		Transport: contextTransport{ctx: ctx, base: http.DefaultTransport},
+		Timeout:   30 * time.Second,
+	}
+	return rss.FetchByClient(url, client)
 }
 
 func (s RSSSource) ID() int64 {
