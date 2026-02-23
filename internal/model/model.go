@@ -18,6 +18,7 @@ type Source struct {
 	Name      string
 	FeedURL   string
 	Priority  int
+	Insecure  bool
 	CreatedAt time.Time
 }
 
@@ -27,6 +28,7 @@ type Article struct {
 	Title       string
 	Link        string
 	Summary     string
+	Categories  []string
 	PublishedAt time.Time
 	PostedAt    time.Time
 	CreatedAt   time.Time

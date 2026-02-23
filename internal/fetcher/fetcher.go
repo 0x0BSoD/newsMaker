@@ -80,6 +80,8 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 		return err
 	}
 
+	const sourceTimeout = 60 * time.Second
+
 	var wg sync.WaitGroup
 
 	for _, source := range sources {
@@ -89,13 +91,16 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 		go func(source Source) {
 			defer wg.Done()
 
-			items, err := source.Fetch(ctx)
+			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
+			defer cancel()
+
+			items, err := source.Fetch(sourceCtx)
 			if err != nil {
 				log.Printf("[ERROR] failed to fetch items from source %q: %v", source.Name(), err)
 				return
 			}
 
-			if err := f.processItems(ctx, source, items); err != nil {
+			if err := f.processItems(sourceCtx, source, items); err != nil {
 				log.Printf("[ERROR] failed to process items from source %q: %v", source.Name(), err)
 				return
 			}
@@ -122,6 +127,7 @@ func (f *Fetcher) processItems(ctx context.Context, source Source, items []model
 			Title:       item.Title,
 			Link:        item.Link,
 			Summary:     item.Summary,
+			Categories:  item.Categories,
 			PublishedAt: item.Date,
 		}); err != nil {
 			return err

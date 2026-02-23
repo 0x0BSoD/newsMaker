@@ -49,11 +49,38 @@ func main() {
 			config.Get().FetchInterval,
 			config.Get().FilterKeywords,
 		)
+	)
+
+	var summarizer notifier.Summarizer
+	switch config.Get().AIType {
+	case "openai":
+		if config.Get().AIKey == "" {
+			log.Printf("[ERROR] ai_key is required when ai_type is \"openai\"")
+			return
+		}
+		summarizer = summary.NewOpenAISummarizer(
+			config.Get().AIBaseURL,
+			config.Get().AIKey,
+			config.Get().AIPrompt,
+			config.Get().AIModel,
+			config.Get().AITimeout,
+		)
+		log.Printf("[INFO] using OpenAI-compatible summarizer (model: %s)", config.Get().AIModel)
+	default:
+		if config.Get().AIBaseURL == "" {
+			log.Printf("[ERROR] ai_base_url is required when ai_type is \"ollama\"")
+			return
+		}
 		summarizer = summary.NewOllamaSummarizer(
 			config.Get().AIBaseURL,
 			config.Get().AIPrompt,
 			config.Get().AIModel,
+			config.Get().AITimeout,
 		)
+		log.Printf("[INFO] using Ollama summarizer (model: %s)", config.Get().AIModel)
+	}
+
+	var (
 		notifier = notifier.New(
 			articleStorage,
 			sourceStorage,

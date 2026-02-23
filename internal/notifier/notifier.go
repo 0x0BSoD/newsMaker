@@ -98,7 +98,7 @@ func (n *Notifier) SelectAndSendArticle(ctx context.Context) error {
 	log.Printf("[INFO] Selected Article: %s", article.Title)
 
 	log.Printf("[INFO] Extracting Summary")
-	summary, err := n.extractSummary(article)
+	summary, err := n.extractSummary(ctx, article)
 	if err != nil {
 		log.Printf("[ERROR] failed to extract summary: %v", err)
 	}
@@ -112,13 +112,21 @@ func (n *Notifier) SelectAndSendArticle(ctx context.Context) error {
 
 var redundantNewLines = regexp.MustCompile(`\n{3,}`)
 
-func (n *Notifier) extractSummary(article model.Article) (string, error) {
+func (n *Notifier) extractSummary(ctx context.Context, article model.Article) (string, error) {
 	var r io.Reader
 
 	if article.Summary != "" {
 		r = strings.NewReader(article.Summary)
 	} else {
-		resp, err := http.Get(article.Link)
+		fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, article.Link, nil)
+		if err != nil {
+			return "", err
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return "", err
 		}
@@ -144,21 +152,47 @@ func cleanupText(text string) string {
 	return redundantNewLines.ReplaceAllString(text, "\n")
 }
 
-func (n *Notifier) sendArticle(article model.Article, summary string) error {
-	const msgFormat = "*%s*%s\n\n%s\n\\#%s"
+// buildTags constructs the hashtag line: source name followed by up to 3
+// category tags. Spaces in category names are replaced with underscores so
+// the result is a valid Telegram hashtag.
+func buildTags(sourceName string, categories []string) string {
+	tags := "\\#" + markup.EscapeForMarkdown(sourceName)
 
-	source, _ := n.sources.SourceByID(context.Background(), article.SourceID)
+	count := 0
+	for _, cat := range categories {
+		if count >= 3 {
+			break
+		}
+		tag := strings.ReplaceAll(strings.TrimSpace(cat), " ", "_")
+		if tag == "" {
+			continue
+		}
+		tags += " \\#" + markup.EscapeForMarkdown(tag)
+		count++
+	}
+
+	return tags
+}
+
+func (n *Notifier) sendArticle(article model.Article, summary string) error {
+	const msgFormat = "*%s*%s\n\n%s\n%s"
+
+	source, err := n.sources.SourceByID(context.Background(), article.SourceID)
+	if err != nil {
+		log.Printf("[ERROR] failed to get source %d for article %d: %v", article.SourceID, article.ID, err)
+		source = &model.Source{Name: "unknown"}
+	}
 
 	msg := tgbotapi.NewMessage(n.channelID, fmt.Sprintf(
 		msgFormat,
 		markup.EscapeForMarkdown(article.Title),
 		markup.EscapeForMarkdown(summary),
 		markup.EscapeForMarkdown(article.Link),
-		markup.EscapeForMarkdown(source.Name),
+		buildTags(source.Name, article.Categories),
 	))
 	msg.ParseMode = "MarkdownV2"
 
-	_, err := n.bot.Send(msg)
+	_, err = n.bot.Send(msg)
 	if err != nil {
 		return err
 	}

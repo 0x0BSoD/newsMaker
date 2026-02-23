@@ -16,10 +16,12 @@ type Config struct {
 	FetchInterval        time.Duration `hcl:"fetch_interval" env:"FETCH_INTERVAL" default:"10m"`
 	NotificationInterval time.Duration `hcl:"notification_interval" env:"NOTIFICATION_INTERVAL" default:"1m"`
 	FilterKeywords       []string      `hcl:"filter_keywords" env:"FILTER_KEYWORDS"`
+	AIType               string        `hcl:"ai_type" env:"AI_TYPE" default:"ollama"`
 	AIBaseURL            string        `hcl:"ai_base_url" env:"AI_BASE_URL"`
 	AIKey                string        `hcl:"ai_key" env:"AI_KEY"`
 	AIPrompt             string        `hcl:"ai_prompt" env:"AI_PROMPT"`
 	AIModel              string        `hcl:"ai_model" env:"AI_MODEL" default:"llama3"`
+	AITimeout            time.Duration `hcl:"ai_timeout" env:"AI_TIMEOUT" default:"5m"`
 }
 
 var (

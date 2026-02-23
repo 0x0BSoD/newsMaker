@@ -59,9 +59,9 @@ func (s *SourcePostgresStorage) Add(ctx context.Context, source model.Source) (i
 
 	row := conn.QueryRowxContext(
 		ctx,
-		`INSERT INTO sources (name, feed_url, priority)
-					VALUES ($1, $2, $3) RETURNING id;`,
-		source.Name, source.FeedURL, source.Priority,
+		`INSERT INTO sources (name, feed_url, priority, insecure)
+					VALUES ($1, $2, $3, $4) RETURNING id;`,
+		source.Name, source.FeedURL, source.Priority, source.Insecure,
 	)
 
 	if err := row.Err(); err != nil {
@@ -106,5 +106,6 @@ type dbSource struct {
 	Name      string    `db:"name"`
 	FeedURL   string    `db:"feed_url"`
 	Priority  int       `db:"priority"`
+	Insecure  bool      `db:"insecure"`
 	CreatedAt time.Time `db:"created_at"`
 }

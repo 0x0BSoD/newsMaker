@@ -3,6 +3,7 @@ package source
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ type RSSSource struct {
 	URL        string
 	SourceID   int64
 	SourceName string
+	Insecure   bool
 }
 
 func NewRSSSourceFromModel(m model.Source) RSSSource {
@@ -35,6 +37,7 @@ func NewRSSSourceFromModel(m model.Source) RSSSource {
 		URL:        m.FeedURL,
 		SourceID:   m.ID,
 		SourceName: m.Name,
+		Insecure:   m.Insecure,
 	}
 }
 
@@ -67,8 +70,14 @@ func itemText(item *rss.Item) string {
 }
 
 func (s RSSSource) loadFeed(ctx context.Context, url string) (*rss.Feed, error) {
+	base := http.DefaultTransport
+	if s.Insecure {
+		base = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		}
+	}
 	client := &http.Client{
-		Transport: contextTransport{ctx: ctx, base: http.DefaultTransport},
+		Transport: contextTransport{ctx: ctx, base: base},
 		Timeout:   30 * time.Second,
 	}
 	return rss.FetchByClient(url, client)

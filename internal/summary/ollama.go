@@ -2,7 +2,6 @@ package summary
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -17,11 +16,11 @@ type OllamaSummarizer struct {
 	client  *api.Client
 	prompt  string
 	model   string
-	enabled bool
+	timeout time.Duration
 	mu      sync.Mutex
 }
 
-func NewOllamaSummarizer(baseURL, prompt, model string) *OllamaSummarizer {
+func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *OllamaSummarizer {
 	httpClient := &http.Client{}
 
 	c := api.NewClient(&url.URL{
@@ -34,7 +33,7 @@ func NewOllamaSummarizer(baseURL, prompt, model string) *OllamaSummarizer {
 		client:  c,
 		prompt:  prompt,
 		model:   model,
-		enabled: true,
+		timeout: timeout,
 	}
 }
 
@@ -44,11 +43,11 @@ func (o *OllamaSummarizer) Summarize(text string) (string, error) {
 	log.Printf("[INFO] Running OLLAMA Summarizer...")
 	req := &api.GenerateRequest{
 		Model:  o.model,
-		Prompt: fmt.Sprintf("%s\n%s", o.prompt, text),
-		Stream: nil,
+		System: o.prompt,
+		Prompt: text,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
 	defer cancel()
 
 	var responseFlow []string
