@@ -6,13 +6,13 @@ require (
 	github.com/SlyMarbo/rss v1.0.5
 	github.com/cristalhq/aconfig v0.19.0
 	github.com/cristalhq/aconfig/aconfighcl v0.17.1
-	github.com/defer-panic/news-feed-bot v0.0.0-20231031224948-23b7d5e1c1ea
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/lib/pq v1.10.9
 	github.com/ollama/ollama v0.16.3
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/stretchr/testify v1.10.0
+	github.com/tomakado/containers v0.0.0-20230201144544-f093171e88cf
 )
 
 require (
@@ -28,7 +28,6 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/tomakado/containers v0.0.0-20230201144544-f093171e88cf // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/net v0.46.0 // indirect

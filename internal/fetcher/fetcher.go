@@ -58,16 +58,18 @@ func (f *Fetcher) Start(ctx context.Context) error {
 	defer ticker.Stop()
 
 	if err := f.Fetch(ctx); err != nil {
-		return err
+		log.Printf("[ERROR] failed to fetch: %v", err)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("[INFO] Fetcher exited")
 			return ctx.Err()
 		case <-ticker.C:
+			log.Printf("[INFO] Fetch started")
 			if err := f.Fetch(ctx); err != nil {
-				return err
+				log.Printf("[ERROR] failed to fetch: %v", err)
 			}
 		}
 	}
@@ -85,11 +87,14 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 	var wg sync.WaitGroup
 
 	for _, source := range sources {
-		log.Printf("[INFO] Checking source %s...", source.Name)
 		wg.Add(1)
+		log.Printf("[INFO] Checking source %s...", source.Name)
 
 		go func(source Source) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+				log.Printf("[INFO] Checking source done %s...", source.Name())
+			}()
 
 			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
 			defer cancel()
