@@ -2,7 +2,8 @@ package fetcher
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/tomakado/containers/set"
 
 	"github.com/0x0BSoD/newsMaker/internal/model"
+	"github.com/0x0BSoD/newsMaker/internal/reporter"
 	src "github.com/0x0BSoD/newsMaker/internal/source"
 )
 
@@ -33,6 +35,7 @@ type Source interface {
 type Fetcher struct {
 	articles ArticleStorage
 	sources  SourcesProvider
+	reporter *reporter.Reporter
 
 	fetchInterval  time.Duration
 	filterKeywords []string
@@ -43,40 +46,40 @@ func New(
 	sourcesProvider SourcesProvider,
 	fetchInterval time.Duration,
 	filterKeywords []string,
+	rep *reporter.Reporter,
 ) *Fetcher {
 	return &Fetcher{
 		articles:       articleStorage,
 		sources:        sourcesProvider,
+		reporter:       rep,
 		fetchInterval:  fetchInterval,
 		filterKeywords: filterKeywords,
 	}
 }
 
 func (f *Fetcher) Start(ctx context.Context) error {
-	log.Printf("[INFO] Fetcher started")
+	slog.Info("fetcher started")
 	ticker := time.NewTicker(f.fetchInterval)
 	defer ticker.Stop()
 
 	if err := f.Fetch(ctx); err != nil {
-		log.Printf("[ERROR] failed to fetch: %v", err)
+		slog.Error("fetch failed", "err", err)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[INFO] Fetcher exited")
+			slog.Info("fetcher stopped")
 			return ctx.Err()
 		case <-ticker.C:
-			log.Printf("[INFO] Fetch started")
 			if err := f.Fetch(ctx); err != nil {
-				log.Printf("[ERROR] failed to fetch: %v", err)
+				slog.Error("fetch failed", "err", err)
 			}
 		}
 	}
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) error {
-	log.Printf("[INFO] Running Fetcher...")
 	sources, err := f.sources.Sources(ctx)
 	if err != nil {
 		return err
@@ -88,25 +91,23 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 
 	for _, source := range sources {
 		wg.Add(1)
-		log.Printf("[INFO] Checking source %s...", source.Name)
 
 		go func(source Source) {
-			defer func() {
-				wg.Done()
-				log.Printf("[INFO] Checking source done %s...", source.Name())
-			}()
+			defer wg.Done()
 
 			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
 			defer cancel()
 
 			items, err := source.Fetch(sourceCtx)
 			if err != nil {
-				log.Printf("[ERROR] failed to fetch items from source %q: %v", source.Name(), err)
+				slog.Error("source fetch failed", "source", source.Name(), "err", err)
+				f.reporter.Notify(fmt.Sprintf("Fetch error [%s]: %v", source.Name(), err))
 				return
 			}
 
 			if err := f.processItems(sourceCtx, source, items); err != nil {
-				log.Printf("[ERROR] failed to process items from source %q: %v", source.Name(), err)
+				slog.Error("source process failed", "source", source.Name(), "err", err)
+				f.reporter.Notify(fmt.Sprintf("Process error [%s]: %v", source.Name(), err))
 				return
 			}
 		}(src.NewRSSSourceFromModel(source))
@@ -119,11 +120,9 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 
 func (f *Fetcher) processItems(ctx context.Context, source Source, items []model.Item) error {
 	for _, item := range items {
-		log.Printf("[INFO] Checking Item %s from source %s ...", item.Title, source.Name())
 		item.Date = item.Date.UTC()
 
 		if f.itemShouldBeSkipped(item) {
-			log.Printf("[INFO] item %q (%s) from source %q should be skipped", item.Title, item.Link, source.Name())
 			continue
 		}
 

@@ -6,7 +6,8 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,23 +23,32 @@ import (
 	"github.com/0x0BSoD/newsMaker/internal/config"
 	"github.com/0x0BSoD/newsMaker/internal/fetcher"
 	"github.com/0x0BSoD/newsMaker/internal/notifier"
+	"github.com/0x0BSoD/newsMaker/internal/reporter"
 	"github.com/0x0BSoD/newsMaker/internal/storage"
 	"github.com/0x0BSoD/newsMaker/internal/summary"
 )
 
 func main() {
-	botAPI, err := tgbotapi.NewBotAPI(config.Get().TelegramBotToken)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
+	cfg := config.Get()
+
+	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
-		log.Printf("[ERROR] failed to create botAPI: %v", err)
+		slog.Error("failed to create bot API", "err", err)
 		return
 	}
 
-	db, err := sqlx.Connect("postgres", config.Get().DatabaseDSN)
+	db, err := sqlx.Connect("postgres", cfg.DatabaseDSN)
 	if err != nil {
-		log.Printf("[ERROR] failed to connect to db: %v", err)
+		slog.Error("failed to connect to database", "err", err)
 		return
 	}
 	defer db.Close()
+
+	rep := reporter.New(botAPI, cfg.TelegramAdminChatID)
 
 	var (
 		articleStorage = storage.NewArticleStorage(db)
@@ -46,38 +56,39 @@ func main() {
 		fetcher        = fetcher.New(
 			articleStorage,
 			sourceStorage,
-			config.Get().FetchInterval,
-			config.Get().FilterKeywords,
+			cfg.FetchInterval,
+			cfg.FilterKeywords,
+			rep,
 		)
 	)
 
 	var summarizer notifier.Summarizer
-	switch config.Get().AIType {
+	switch cfg.AIType {
 	case "openai":
-		if config.Get().AIKey == "" {
-			log.Printf("[ERROR] ai_key is required when ai_type is \"openai\"")
+		if cfg.AIKey == "" {
+			slog.Error("ai_key is required when ai_type is openai")
 			return
 		}
 		summarizer = summary.NewOpenAISummarizer(
-			config.Get().AIBaseURL,
-			config.Get().AIKey,
-			config.Get().AIPrompt,
-			config.Get().AIModel,
-			config.Get().AITimeout,
+			cfg.AIBaseURL,
+			cfg.AIKey,
+			cfg.AIPrompt,
+			cfg.AIModel,
+			cfg.AITimeout,
 		)
-		log.Printf("[INFO] using OpenAI-compatible summarizer (model: %s)", config.Get().AIModel)
+		slog.Info("summarizer ready", "type", "openai", "model", cfg.AIModel)
 	default:
-		if config.Get().AIBaseURL == "" {
-			log.Printf("[ERROR] ai_base_url is required when ai_type is \"ollama\"")
+		if cfg.AIBaseURL == "" {
+			slog.Error("ai_base_url is required when ai_type is ollama")
 			return
 		}
 		summarizer = summary.NewOllamaSummarizer(
-			config.Get().AIBaseURL,
-			config.Get().AIPrompt,
-			config.Get().AIModel,
-			config.Get().AITimeout,
+			cfg.AIBaseURL,
+			cfg.AIPrompt,
+			cfg.AIModel,
+			cfg.AITimeout,
 		)
-		log.Printf("[INFO] using Ollama summarizer (model: %s)", config.Get().AIModel)
+		slog.Info("summarizer ready", "type", "ollama", "model", cfg.AIModel)
 	}
 
 	var (
@@ -86,9 +97,10 @@ func main() {
 			sourceStorage,
 			summarizer,
 			botAPI,
-			config.Get().NotificationInterval,
-			2*config.Get().FetchInterval,
-			config.Get().TelegramChannelID,
+			cfg.NotificationInterval,
+			2*cfg.FetchInterval,
+			cfg.TelegramChannelID,
+			rep,
 		)
 	)
 
@@ -96,35 +108,35 @@ func main() {
 	newsBot.RegisterCmdView(
 		"addsource",
 		middleware.AdminsOnly(
-			config.Get().TelegramChannelID,
+			cfg.TelegramChannelID,
 			bot.ViewCmdAddSource(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"setpriority",
 		middleware.AdminsOnly(
-			config.Get().TelegramChannelID,
+			cfg.TelegramChannelID,
 			bot.ViewCmdSetPriority(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"getsource",
 		middleware.AdminsOnly(
-			config.Get().TelegramChannelID,
+			cfg.TelegramChannelID,
 			bot.ViewCmdGetSource(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"listsources",
 		middleware.AdminsOnly(
-			config.Get().TelegramChannelID,
+			cfg.TelegramChannelID,
 			bot.ViewCmdListSource(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"deletesource",
 		middleware.AdminsOnly(
-			config.Get().TelegramChannelID,
+			cfg.TelegramChannelID,
 			bot.ViewCmdDeleteSource(sourceStorage),
 		),
 	)
@@ -140,37 +152,34 @@ func main() {
 	go func(ctx context.Context) {
 		if err := fetcher.Start(ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Printf("[ERROR] failed to run fetcher: %v", err)
+				slog.Error("fetcher stopped unexpectedly", "err", err)
+				rep.Notify(fmt.Sprintf("Fetcher stopped: %v", err))
 				return
 			}
-
-			log.Printf("[INFO] fetcher stopped")
+			slog.Info("fetcher stopped")
 		}
 	}(ctx)
 
 	go func(ctx context.Context) {
 		if err := notifier.Start(ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Printf("[ERROR] failed to run notifier: %v", err)
+				slog.Error("notifier stopped unexpectedly", "err", err)
+				rep.Notify(fmt.Sprintf("Notifier stopped: %v", err))
 				return
 			}
-
-			log.Printf("[INFO] notifier stopped")
+			slog.Info("notifier stopped")
 		}
 	}(ctx)
 
 	go func(ctx context.Context) {
 		if err := http.ListenAndServe("127.0.0.1:8088", mux); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				log.Printf("[ERROR] failed to run http server: %v", err)
-				return
+			if !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("http server stopped unexpectedly", "err", err)
 			}
-
-			log.Printf("[INFO] http server stopped")
 		}
 	}(ctx)
 
-	if err := newsBot.Run(ctx); err != nil {
-		log.Printf("[ERROR] failed to run botkit: %v", err)
+	if err := newsBot.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		slog.Error("botkit stopped unexpectedly", "err", err)
 	}
 }

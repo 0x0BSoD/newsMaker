@@ -3,7 +3,6 @@ package summary
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -33,8 +32,6 @@ func NewOpenAISummarizer(baseURL, apiKey, prompt, model string, timeout time.Dur
 }
 
 func (o *OpenAISummarizer) Summarize(text string) (string, error) {
-	log.Printf("[INFO] Running OpenAI Summarizer...")
-
 	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
 	defer cancel()
 

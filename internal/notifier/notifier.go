@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/0x0BSoD/newsMaker/internal/botkit/markup"
 	"github.com/0x0BSoD/newsMaker/internal/model"
+	"github.com/0x0BSoD/newsMaker/internal/reporter"
 )
 
 type ArticleProvider interface {
@@ -36,6 +37,7 @@ type Notifier struct {
 	sources          SourcesProvider
 	summarizer       Summarizer
 	bot              *tgbotapi.BotAPI
+	reporter         *reporter.Reporter
 	sendInterval     time.Duration
 	lookupTimeWindow time.Duration
 	channelID        int64
@@ -49,12 +51,14 @@ func New(
 	sendInterval time.Duration,
 	lookupTimeWindow time.Duration,
 	channelID int64,
+	rep *reporter.Reporter,
 ) *Notifier {
 	return &Notifier{
 		articles:         articleProvider,
 		sources:          sourcesProvider,
 		summarizer:       summarizer,
 		bot:              bot,
+		reporter:         rep,
 		sendInterval:     sendInterval,
 		lookupTimeWindow: lookupTimeWindow,
 		channelID:        channelID,
@@ -62,7 +66,7 @@ func New(
 }
 
 func (n *Notifier) Start(ctx context.Context) error {
-	log.Printf("[INFO] Notifier started")
+	slog.Info("notifier started")
 
 	ticker := time.NewTicker(n.sendInterval)
 	defer ticker.Stop()
@@ -84,7 +88,6 @@ func (n *Notifier) Start(ctx context.Context) error {
 }
 
 func (n *Notifier) SelectAndSendArticle(ctx context.Context) error {
-	log.Printf("[INFO] Selecting not posted Article")
 	topOneArticles, err := n.articles.AllNotPosted(ctx, time.Now().Add(-n.lookupTimeWindow), 1)
 	if err != nil {
 		return err
@@ -95,12 +98,12 @@ func (n *Notifier) SelectAndSendArticle(ctx context.Context) error {
 	}
 
 	article := topOneArticles[0]
-	log.Printf("[INFO] Selected Article: %s", article.Title)
+	slog.Info("posting article", "title", article.Title)
 
-	log.Printf("[INFO] Extracting Summary")
 	summary, err := n.extractSummary(ctx, article)
 	if err != nil {
-		log.Printf("[ERROR] failed to extract summary: %v", err)
+		slog.Error("summary extraction failed", "title", article.Title, "err", err)
+		n.reporter.Notify(fmt.Sprintf("Summary error [%s]: %v", article.Title, err))
 	}
 
 	if err := n.sendArticle(article, summary); err != nil {
@@ -179,7 +182,7 @@ func (n *Notifier) sendArticle(article model.Article, summary string) error {
 
 	source, err := n.sources.SourceByID(context.Background(), article.SourceID)
 	if err != nil {
-		log.Printf("[ERROR] failed to get source %d for article %d: %v", article.SourceID, article.ID, err)
+		slog.Error("source lookup failed", "sourceID", article.SourceID, "articleID", article.ID, "err", err)
 		source = &model.Source{Name: "unknown"}
 	}
 

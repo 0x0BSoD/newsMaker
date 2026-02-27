@@ -54,7 +54,7 @@ func TestFetcher_Fetch(t *testing.T) {
 					return nil
 				},
 			}
-			fetcher = fetcher.New(articleStorage, sourcesProvider, 0, nil)
+			fetcher = fetcher.New(articleStorage, sourcesProvider, 0, nil, nil)
 		)
 
 		require.NoError(t, fetcher.Fetch(context.Background()))
@@ -71,7 +71,7 @@ func TestFetcher_Fetch(t *testing.T) {
 				},
 			}
 			filterKeywords = []string{"leetcode"}
-			fetcher        = fetcher.New(articleStorage, sourcesProvider, 0, filterKeywords)
+			fetcher        = fetcher.New(articleStorage, sourcesProvider, 0, filterKeywords, nil)
 		)
 
 		require.NoError(t, fetcher.Fetch(context.Background()))

@@ -2,7 +2,6 @@ package summary
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -40,7 +39,7 @@ func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *
 func (o *OllamaSummarizer) Summarize(text string) (string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	log.Printf("[INFO] Running OLLAMA Summarizer...")
+
 	req := &api.GenerateRequest{
 		Model:  o.model,
 		System: o.prompt,
@@ -52,7 +51,6 @@ func (o *OllamaSummarizer) Summarize(text string) (string, error) {
 
 	var responseFlow []string
 	err := o.client.Generate(ctx, req, func(resp api.GenerateResponse) error {
-		log.Printf("[INFO] OLLAMA Summarizer, working...")
 		responseFlow = append(responseFlow, resp.Response)
 		return nil
 	})

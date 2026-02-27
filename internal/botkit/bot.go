@@ -2,7 +2,7 @@ package botkit
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -47,7 +47,7 @@ func (b *Bot) Run(ctx context.Context) error {
 func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	defer func() {
 		if p := recover(); p != nil {
-			log.Printf("[ERROR] panic recovered: %v\n%s", p, string(debug.Stack()))
+			slog.Error("panic recovered", "panic", p, "stack", string(debug.Stack()))
 		}
 	}()
 
@@ -71,10 +71,10 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 	view = cmdView
 
 	if err := view(ctx, b.api, update); err != nil {
-		log.Printf("[ERROR] failed to execute view: %v", err)
+		slog.Error("command view failed", "cmd", cmd, "err", err)
 
 		if _, err := b.api.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Internal error")); err != nil {
-			log.Printf("[ERROR] failed to send error message: %v", err)
+			slog.Error("failed to send error reply", "err", err)
 		}
 	}
 }

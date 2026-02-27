@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -12,6 +12,7 @@ import (
 type Config struct {
 	TelegramBotToken     string        `hcl:"telegram_bot_token" env:"TELEGRAM_BOT_TOKEN" required:"true"`
 	TelegramChannelID    int64         `hcl:"telegram_channel_id" env:"TELEGRAM_CHANNEL_ID" required:"true"`
+	TelegramAdminChatID  int64         `hcl:"telegram_admin_chat_id" env:"TELEGRAM_ADMIN_CHAT_ID"`
 	DatabaseDSN          string        `hcl:"database_dsn" env:"DATABASE_DSN" default:"postgres://postgres:postgres@localhost:5432/news?sslmode=disable"`
 	FetchInterval        time.Duration `hcl:"fetch_interval" env:"FETCH_INTERVAL" default:"10m"`
 	NotificationInterval time.Duration `hcl:"notification_interval" env:"NOTIFICATION_INTERVAL" default:"1m"`
@@ -40,7 +41,7 @@ func Get() Config {
 		})
 
 		if err := loader.Load(); err != nil {
-			log.Printf("[ERROR] failed to load config: %v", err)
+			slog.Error("failed to load config", "err", err)
 		}
 	})
 
