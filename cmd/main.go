@@ -109,7 +109,7 @@ func main() {
 		"addsource",
 		middleware.AdminsOnly(
 			cfg.TelegramChannelID,
-			bot.ViewCmdAddSource(sourceStorage),
+			bot.ViewCmdAddSource(sourceStorage, newsBot),
 		),
 	)
 	newsBot.RegisterCmdView(

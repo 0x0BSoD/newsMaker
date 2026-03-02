@@ -4,18 +4,26 @@ import (
 	"context"
 	"log/slog"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+type ViewFunc func(ctx context.Context, bot *tgbotapi.BotAPI, update tgbotapi.Update) error
+
 type Bot struct {
-	api      *tgbotapi.BotAPI
-	cmdViews map[string]ViewFunc
+	api         *tgbotapi.BotAPI
+	cmdViews    map[string]ViewFunc
+	msgHandlers map[int64]ViewFunc
+	mu          sync.Mutex
 }
 
 func New(api *tgbotapi.BotAPI) *Bot {
-	return &Bot{api: api}
+	return &Bot{
+		api:         api,
+		msgHandlers: make(map[int64]ViewFunc),
+	}
 }
 
 func (b *Bot) RegisterCmdView(cmd string, view ViewFunc) {
@@ -24,6 +32,21 @@ func (b *Bot) RegisterCmdView(cmd string, view ViewFunc) {
 	}
 
 	b.cmdViews[cmd] = view
+}
+
+// RegisterMsgHandler registers a one-shot message handler for a specific chat.
+// It will be called for the next non-command message received in that chat.
+func (b *Bot) RegisterMsgHandler(chatID int64, handler ViewFunc) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.msgHandlers[chatID] = handler
+}
+
+// ClearMsgHandler removes any pending message handler for a specific chat.
+func (b *Bot) ClearMsgHandler(chatID int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.msgHandlers, chatID)
 }
 
 func (b *Bot) Run(ctx context.Context) error {
@@ -51,15 +74,32 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 		}
 	}()
 
-	if (update.Message == nil || !update.Message.IsCommand()) && update.CallbackQuery == nil {
+	if update.Message == nil && update.CallbackQuery == nil {
 		return
 	}
 
-	var view ViewFunc
+	if update.Message != nil && !update.Message.IsCommand() {
+		b.mu.Lock()
+		handler, ok := b.msgHandlers[update.Message.Chat.ID]
+		b.mu.Unlock()
 
-	if !update.Message.IsCommand() {
+		if ok {
+			if err := handler(ctx, b.api, update); err != nil {
+				slog.Error("message handler failed", "err", err)
+				if _, err := b.api.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Internal error")); err != nil {
+					slog.Error("failed to send error reply", "err", err)
+				}
+			}
+		}
 		return
 	}
+
+	if update.Message == nil || !update.Message.IsCommand() {
+		return
+	}
+
+	// A new command clears any pending conversation state for this chat.
+	b.ClearMsgHandler(update.Message.Chat.ID)
 
 	cmd := update.Message.Command()
 
@@ -68,9 +108,7 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	view = cmdView
-
-	if err := view(ctx, b.api, update); err != nil {
+	if err := cmdView(ctx, b.api, update); err != nil {
 		slog.Error("command view failed", "cmd", cmd, "err", err)
 
 		if _, err := b.api.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "Internal error")); err != nil {
@@ -78,5 +116,3 @@ func (b *Bot) handleUpdate(ctx context.Context, update tgbotapi.Update) {
 		}
 	}
 }
-
-type ViewFunc func(ctx context.Context, bot *tgbotapi.BotAPI, update tgbotapi.Update) error

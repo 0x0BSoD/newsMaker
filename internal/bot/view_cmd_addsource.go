@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"time"
@@ -20,56 +19,62 @@ type SourceStorage interface {
 	Add(ctx context.Context, source model.Source) (int64, error)
 }
 
-func ViewCmdAddSource(storage SourceStorage) botkit.ViewFunc {
-	type addSourceArgs struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		Priority int    `json:"priority"`
-		Insecure bool   `json:"insecure"`
-	}
+func ViewCmdAddSource(storage SourceStorage, b *botkit.Bot) botkit.ViewFunc {
+	return func(ctx context.Context, api *tgbotapi.BotAPI, update tgbotapi.Update) error {
+		chatID := update.Message.Chat.ID
 
-	return func(ctx context.Context, bot *tgbotapi.BotAPI, update tgbotapi.Update) error {
-		args, err := botkit.ParseJSON[addSourceArgs](update.Message.CommandArguments())
-		if err != nil {
+		if _, err := api.Send(tgbotapi.NewMessage(chatID, "Введите название источника:")); err != nil {
 			return err
 		}
 
-		probeClient := &http.Client{Timeout: feedProbeTimeout}
-		if args.Insecure {
-			probeClient.Transport = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-			}
+		b.RegisterMsgHandler(chatID, askURLHandler(storage, b, chatID))
+		return nil
+	}
+}
+
+func askURLHandler(storage SourceStorage, b *botkit.Bot, chatID int64) botkit.ViewFunc {
+	return func(ctx context.Context, api *tgbotapi.BotAPI, update tgbotapi.Update) error {
+		name := update.Message.Text
+
+		if _, err := api.Send(tgbotapi.NewMessage(chatID, "Введите URL RSS-фида:")); err != nil {
+			return err
 		}
-		if _, err := rss.FetchByClient(args.URL, probeClient); err != nil {
-			reply := tgbotapi.NewMessage(update.Message.Chat.ID,
-				fmt.Sprintf("Не удалось получить фид по указанному URL: %v", err))
-			_, _ = bot.Send(reply)
+
+		b.RegisterMsgHandler(chatID, saveSourceHandler(storage, b, chatID, name))
+		return nil
+	}
+}
+
+func saveSourceHandler(storage SourceStorage, b *botkit.Bot, chatID int64, name string) botkit.ViewFunc {
+	return func(ctx context.Context, api *tgbotapi.BotAPI, update tgbotapi.Update) error {
+		feedURL := update.Message.Text
+
+		probeClient := &http.Client{Timeout: feedProbeTimeout}
+		if _, err := rss.FetchByClient(feedURL, probeClient); err != nil {
+			// Ask for URL again on bad feed.
+			reply := tgbotapi.NewMessage(chatID,
+				fmt.Sprintf("Не удалось получить фид по указанному URL: %v\n\nВведите другой URL или отправьте команду для отмены.", err))
+			_, _ = api.Send(reply)
+			b.RegisterMsgHandler(chatID, saveSourceHandler(storage, b, chatID, name))
 			return nil
 		}
 
-		source := model.Source{
-			Name:     args.Name,
-			FeedURL:  args.URL,
-			Priority: args.Priority,
-			Insecure: args.Insecure,
-		}
-
-		sourceID, err := storage.Add(ctx, source)
+		sourceID, err := storage.Add(ctx, model.Source{Name: name, FeedURL: feedURL})
 		if err != nil {
+			b.ClearMsgHandler(chatID)
 			return err
 		}
 
-		var (
-			msgText = fmt.Sprintf(
-				"Источник добавлен с ID: `%d`\\. Используйте этот ID для обновления источника или удаления\\.",
-				sourceID,
-			)
-			reply = tgbotapi.NewMessage(update.Message.Chat.ID, msgText)
-		)
+		b.ClearMsgHandler(chatID)
 
+		msgText := fmt.Sprintf(
+			"Источник добавлен с ID: `%d`\\. Используйте этот ID для обновления источника или удаления\\.",
+			sourceID,
+		)
+		reply := tgbotapi.NewMessage(chatID, msgText)
 		reply.ParseMode = parseModeMarkdownV2
 
-		if _, err := bot.Send(reply); err != nil {
+		if _, err := api.Send(reply); err != nil {
 			return err
 		}
 
