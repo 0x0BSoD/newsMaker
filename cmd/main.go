@@ -13,19 +13,22 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/0x0BSoD/newsMaker/internal/bot"
-	"github.com/0x0BSoD/newsMaker/internal/bot/middleware"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
+	"github.com/0x0BSoD/newsMaker/internal/bot"
+	"github.com/0x0BSoD/newsMaker/internal/bot/middleware"
 	"github.com/0x0BSoD/newsMaker/internal/botkit"
 	"github.com/0x0BSoD/newsMaker/internal/config"
+	"github.com/0x0BSoD/newsMaker/internal/digest"
 	"github.com/0x0BSoD/newsMaker/internal/fetcher"
+	"github.com/0x0BSoD/newsMaker/internal/github"
 	"github.com/0x0BSoD/newsMaker/internal/notifier"
 	"github.com/0x0BSoD/newsMaker/internal/reporter"
 	"github.com/0x0BSoD/newsMaker/internal/storage"
 	"github.com/0x0BSoD/newsMaker/internal/summary"
+	"github.com/0x0BSoD/newsMaker/internal/telegraph"
 )
 
 func main() {
@@ -48,21 +51,15 @@ func main() {
 	}
 	defer db.Close()
 
-	rep := reporter.New(botAPI, cfg.TelegramAdminChatID)
+	githubClient := github.NewClient(cfg.GitHubToken)
+	telegraphClient := telegraph.NewClient(cfg.TelegraphToken)
+	repoStorage := storage.NewGitHubRepoStorage(db)
 
 	var (
-		articleStorage = storage.NewArticleStorage(db)
-		sourceStorage  = storage.NewSourceStorage(db)
-		fetcher        = fetcher.New(
-			articleStorage,
-			sourceStorage,
-			cfg.FetchInterval,
-			cfg.FilterKeywords,
-			rep,
-		)
+		summarizer       notifier.Summarizer
+		digestSummarizer notifier.Summarizer
 	)
 
-	var summarizer notifier.Summarizer
 	switch cfg.AIType {
 	case "openai":
 		if cfg.AIKey == "" {
@@ -91,8 +88,33 @@ func main() {
 		slog.Info("summarizer ready", "type", "ollama", "model", cfg.AIModel)
 	}
 
+	switch cfg.AIType {
+	case "openai":
+		digestSummarizer = summary.NewOpenAISummarizer(
+			cfg.AIBaseURL,
+			cfg.AIKey,
+			cfg.DigestSummaryPrompt,
+			cfg.AIModel,
+			cfg.AITimeout,
+		)
+	default:
+		digestSummarizer = summary.NewOllamaSummarizer(
+			cfg.AIBaseURL,
+			cfg.DigestSummaryPrompt,
+			cfg.AIModel,
+			cfg.AITimeout,
+		)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	rep := reporter.New(botAPI, cfg.TelegramAdminChatID)
+
 	var (
-		notifier = notifier.New(
+		articleStorage = storage.NewArticleStorage(db)
+		sourceStorage  = storage.NewSourceStorage(db)
+		notifier       = notifier.New(
 			articleStorage,
 			sourceStorage,
 			summarizer,
@@ -101,6 +123,23 @@ func main() {
 			2*cfg.FetchInterval,
 			cfg.TelegramChannelID,
 			rep,
+		)
+		fetcher = fetcher.New(
+			articleStorage,
+			sourceStorage,
+			cfg.FetchInterval,
+			cfg.FilterKeywords,
+			rep,
+		)
+		digest = digest.New(
+			githubClient,
+			telegraphClient,
+			botAPI,
+			repoStorage,
+			digestSummarizer,
+			cfg.TelegramChannelID,
+			cfg.GitHubTopics,
+			cfg.DigestInterval,
 		)
 	)
 
@@ -146,8 +185,16 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	go func(ctx context.Context) {
+		if err := digest.Start(ctx); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				slog.Error("digest stopped unexpectedly", "err", err)
+				rep.Notify(fmt.Sprintf("Notifier stopped: %v", err))
+				return
+			}
+			slog.Error("digest stopped", "err", err)
+		}
+	}(ctx)
 
 	go func(ctx context.Context) {
 		if err := fetcher.Start(ctx); err != nil {
