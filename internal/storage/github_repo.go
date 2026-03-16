@@ -19,6 +19,9 @@ type GitHubRepo struct {
 type GitHubRepoStorage interface {
 	Upsert(ctx context.Context, repos []GitHubRepo) (newCount int, err error)
 	MarkPosted(ctx context.Context, fullNames []string) error
+	// LastPostedAt returns the most recent posted_at timestamp across all repos.
+	// The second return value is false if no repo has been posted yet.
+	LastPostedAt(ctx context.Context) (time.Time, bool, error)
 }
 
 type GitHubRepoPostgresStorage struct {
@@ -101,4 +104,26 @@ func (s *GitHubRepoPostgresStorage) MarkPosted(ctx context.Context, fullNames []
 		pq.Array(fullNames),
 	)
 	return err
+}
+
+// LastPostedAt returns the most recent posted_at timestamp across all repos.
+// Returns (zero, false, nil) if no repo has been posted yet.
+func (s *GitHubRepoPostgresStorage) LastPostedAt(ctx context.Context) (time.Time, bool, error) {
+	conn, err := s.db.Connx(ctx)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	defer conn.Close()
+
+	var ts pq.NullTime
+	if err := conn.QueryRowxContext(ctx,
+		`SELECT MAX(posted_at) FROM github_repos`,
+	).Scan(&ts); err != nil {
+		return time.Time{}, false, err
+	}
+
+	if !ts.Valid {
+		return time.Time{}, false, nil
+	}
+	return ts.Time, true, nil
 }

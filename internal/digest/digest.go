@@ -18,6 +18,7 @@ import (
 type RepoStorage interface {
 	Upsert(ctx context.Context, repos []storage.GitHubRepo) (newCount int, err error)
 	MarkPosted(ctx context.Context, fullNames []string) error
+	LastPostedAt(ctx context.Context) (time.Time, bool, error)
 }
 
 // Summarizer is satisfied by the Ollama / OpenAI summarizer implementations.
@@ -86,9 +87,23 @@ type topicResult struct {
 	summary  string
 }
 
+const digestCooldown = 7 * 24 * time.Hour
+
 func (d *Digest) run(ctx context.Context) error {
 	if len(d.topics) == 0 {
 		slog.Warn("no topics configured, skipping digest")
+		return nil
+	}
+
+	lastPosted, ok, err := d.storage.LastPostedAt(ctx)
+	if err != nil {
+		return fmt.Errorf("check last posted: %w", err)
+	}
+	if ok && time.Since(lastPosted) < digestCooldown {
+		slog.Info("digest already sent recently, skipping",
+			"lastPosted", lastPosted,
+			"nextIn", digestCooldown-time.Since(lastPosted).Truncate(time.Hour),
+		)
 		return nil
 	}
 
