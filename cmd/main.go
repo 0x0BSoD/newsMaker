@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -38,6 +39,16 @@ func main() {
 
 	cfg := config.Get()
 
+	summaryInputDir := cfg.SummaryInputDir
+	if summaryInputDir == "" {
+		if exe, err := os.Executable(); err == nil {
+			summaryInputDir = filepath.Dir(exe)
+		} else {
+			slog.Warn("could not resolve binary dir, using working directory", "err", err)
+			summaryInputDir = "."
+		}
+	}
+
 	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
 	if err != nil {
 		slog.Error("failed to create bot API", "err", err)
@@ -56,8 +67,8 @@ func main() {
 	repoStorage := storage.NewGitHubRepoStorage(db)
 
 	var (
-		summarizer       notifier.Summarizer
-		digestSummarizer notifier.Summarizer
+		digestSummarizer     notifier.Summarizer
+		newsDigestSummarizer notifier.Summarizer
 	)
 
 	switch cfg.AIType {
@@ -66,30 +77,6 @@ func main() {
 			slog.Error("ai_key is required when ai_type is openai")
 			return
 		}
-		summarizer = summary.NewOpenAISummarizer(
-			cfg.AIBaseURL,
-			cfg.AIKey,
-			cfg.AIPrompt,
-			cfg.AIModel,
-			cfg.AITimeout,
-		)
-		slog.Info("summarizer ready", "type", "openai", "model", cfg.AIModel)
-	default:
-		if cfg.AIBaseURL == "" {
-			slog.Error("ai_base_url is required when ai_type is ollama")
-			return
-		}
-		summarizer = summary.NewOllamaSummarizer(
-			cfg.AIBaseURL,
-			cfg.AIPrompt,
-			cfg.AIModel,
-			cfg.AITimeout,
-		)
-		slog.Info("summarizer ready", "type", "ollama", "model", cfg.AIModel)
-	}
-
-	switch cfg.AIType {
-	case "openai":
 		digestSummarizer = summary.NewOpenAISummarizer(
 			cfg.AIBaseURL,
 			cfg.AIKey,
@@ -97,13 +84,32 @@ func main() {
 			cfg.AIModel,
 			cfg.AITimeout,
 		)
+		newsDigestSummarizer = summary.NewOpenAISummarizer(
+			cfg.AIBaseURL,
+			cfg.AIKey,
+			cfg.NewsDigestPrompt,
+			cfg.AIModel,
+			cfg.AITimeout,
+		)
+		slog.Info("summarizers ready", "type", "openai", "model", cfg.AIModel)
 	default:
+		if cfg.AIBaseURL == "" {
+			slog.Error("ai_base_url is required when ai_type is ollama")
+			return
+		}
 		digestSummarizer = summary.NewOllamaSummarizer(
 			cfg.AIBaseURL,
 			cfg.DigestSummaryPrompt,
 			cfg.AIModel,
 			cfg.AITimeout,
 		)
+		newsDigestSummarizer = summary.NewOllamaSummarizer(
+			cfg.AIBaseURL,
+			cfg.NewsDigestPrompt,
+			cfg.AIModel,
+			cfg.AITimeout,
+		)
+		slog.Info("summarizers ready", "type", "ollama", "model", cfg.AIModel)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -116,13 +122,18 @@ func main() {
 		sourceStorage  = storage.NewSourceStorage(db)
 		notifier       = notifier.New(
 			articleStorage,
-			sourceStorage,
-			summarizer,
+			newsDigestSummarizer,
 			botAPI,
-			cfg.NotificationInterval,
-			2*cfg.FetchInterval,
+			cfg.NewsDigestMorningHour,
+			cfg.NewsDigestNoonHour,
+			cfg.NewsDigestEveningHour,
+			cfg.NewsDigestLookback,
+			cfg.NewsDigestMaxArticles,
 			cfg.TelegramChannelID,
 			rep,
+			cfg.NewsDigestRetryInterval,
+			cfg.NewsDigestMaxRetries,
+			summaryInputDir,
 		)
 		fetcher = fetcher.New(
 			articleStorage,
@@ -140,10 +151,31 @@ func main() {
 			cfg.TelegramChannelID,
 			cfg.GitHubTopics,
 			cfg.DigestInterval,
+			summaryInputDir,
 		)
 	)
 
+	// Fall back to the admin chat if no dedicated test channel is configured.
+	testChannelID := cfg.TelegramTestChannelID
+	if testChannelID == 0 {
+		testChannelID = cfg.TelegramAdminChatID
+	}
+
 	newsBot := botkit.New(botAPI)
+	newsBot.RegisterCmdView(
+		"testdigest",
+		middleware.AdminsOnly(
+			cfg.TelegramChannelID,
+			bot.ViewCmdTestDigest(digest, testChannelID),
+		),
+	)
+	newsBot.RegisterCmdView(
+		"testnews",
+		middleware.AdminsOnly(
+			cfg.TelegramChannelID,
+			bot.ViewCmdTestNews(notifier, testChannelID),
+		),
+	)
 	newsBot.RegisterCmdView(
 		"addsource",
 		middleware.AdminsOnly(
