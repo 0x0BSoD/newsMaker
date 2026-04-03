@@ -150,15 +150,25 @@ func (n *Notifier) SendDigest(ctx context.Context, greeting string) error {
 // SendTestDigest sends a digest to channelID without marking articles as
 // posted, so the production article queue is not affected.
 func (n *Notifier) SendTestDigest(ctx context.Context, channelID int64) error {
-	now := time.Now()
-	h := now.Hour()
-	greeting := "evening"
-	if h < n.noonHour {
-		greeting = "morning"
-	} else if h < n.eveningHour {
-		greeting = "afternoon"
+	return n.send(ctx, n.currentGreeting(), channelID, false)
+}
+
+// Repost sends a digest to the production channel and marks articles as posted.
+// Intended for manual recovery after all automatic retry attempts have failed.
+func (n *Notifier) Repost(ctx context.Context) error {
+	return n.send(ctx, n.currentGreeting(), n.channelID, true)
+}
+
+func (n *Notifier) currentGreeting() string {
+	h := time.Now().Hour()
+	switch {
+	case h < n.noonHour:
+		return "morning"
+	case h < n.eveningHour:
+		return "afternoon"
+	default:
+		return "evening"
 	}
-	return n.send(ctx, greeting, channelID, false)
 }
 
 func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, markPosted bool) error {
@@ -189,6 +199,8 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 			slog.Warn("summarizer returned empty text, using simple fallback")
 		}
 		digestText = buildSimpleDigest(greeting, grouped)
+	} else {
+		digestText = markup.SanitizeTelegramHTML(digestText)
 	}
 
 	msg := tgbotapi.NewMessage(channelID, digestText)

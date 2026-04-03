@@ -177,6 +177,13 @@ func main() {
 		),
 	)
 	newsBot.RegisterCmdView(
+		"repostnews",
+		middleware.AdminsOnly(
+			cfg.TelegramChannelID,
+			bot.ViewCmdRepostNews(notifier),
+		),
+	)
+	newsBot.RegisterCmdView(
 		"addsource",
 		middleware.AdminsOnly(
 			cfg.TelegramChannelID,

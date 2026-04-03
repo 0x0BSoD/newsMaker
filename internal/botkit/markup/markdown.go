@@ -92,15 +92,11 @@ func EscapeForHTML(src string) string {
 // brTag matches <br>, <br/>, <br /> in any case.
 var brTag = regexp.MustCompile(`(?i)<br\s*/?>`)
 
-// anyTag matches any HTML-like tag.
-var anyTag = regexp.MustCompile(`<[^>]+>`)
-
 // SanitizeTelegramHTML cleans LLM-generated text before embedding it into a
 // Telegram HTML message. It converts <br> to newlines and strips all other
 // HTML tags (the LLM should not produce Telegram HTML; the caller adds its own
 // structural tags around the summary).
 func SanitizeTelegramHTML(s string) string {
 	s = brTag.ReplaceAllString(s, "\n")
-	s = anyTag.ReplaceAllString(s, "")
 	return s
 }
