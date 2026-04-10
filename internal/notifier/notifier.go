@@ -200,6 +200,7 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 		}
 		digestText = buildSimpleDigest(greeting, grouped)
 	} else {
+		writeSummaryInput(n.summaryInputDir, "digest_output.txt", digestText)
 		digestText = markup.SanitizeTelegramHTML(digestText)
 	}
 

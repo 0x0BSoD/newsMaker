@@ -92,6 +92,14 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 	for _, source := range sources {
 		wg.Add(1)
 
+		s, err := newSource(source)
+		if err != nil {
+			slog.Error("source init failed", "source", source.Name, "err", err)
+			f.reporter.Notify(fmt.Sprintf("Source init error [%s]: %v", source.Name, err))
+			wg.Done()
+			continue
+		}
+
 		go func(source Source) {
 			defer wg.Done()
 
@@ -110,7 +118,7 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 				f.reporter.Notify(fmt.Sprintf("Process error [%s]: %v", source.Name(), err))
 				return
 			}
-		}(src.NewRSSSourceFromModel(source))
+		}(s)
 	}
 
 	wg.Wait()
@@ -151,4 +159,13 @@ func (f *Fetcher) itemShouldBeSkipped(item model.Item) bool {
 	}
 
 	return false
+}
+
+func newSource(m model.Source) (Source, error) {
+	switch m.SourceType {
+	case model.SourceTypeWeb:
+		return src.NewWebSourceFromModel(m)
+	default:
+		return src.NewRSSSourceFromModel(m), nil
+	}
 }

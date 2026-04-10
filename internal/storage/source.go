@@ -2,6 +2,9 @@ package storage
 
 import (
 	"context"
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -30,7 +33,7 @@ func (s *SourcePostgresStorage) Sources(ctx context.Context) ([]model.Source, er
 		return nil, err
 	}
 
-	return lo.Map(sources, func(source dbSource, _ int) model.Source { return model.Source(source) }), nil
+	return lo.Map(sources, func(source dbSource, _ int) model.Source { return source.toModel() }), nil
 }
 
 func (s *SourcePostgresStorage) SourceByID(ctx context.Context, id int64) (*model.Source, error) {
@@ -45,7 +48,8 @@ func (s *SourcePostgresStorage) SourceByID(ctx context.Context, id int64) (*mode
 		return nil, err
 	}
 
-	return (*model.Source)(&source), nil
+	m := source.toModel()
+	return &m, nil
 }
 
 func (s *SourcePostgresStorage) Add(ctx context.Context, source model.Source) (int64, error) {
@@ -57,11 +61,16 @@ func (s *SourcePostgresStorage) Add(ctx context.Context, source model.Source) (i
 
 	var id int64
 
+	var scraperCfg *dbScraperConfig
+	if source.ScraperConfig != nil {
+		scraperCfg = &dbScraperConfig{*source.ScraperConfig}
+	}
+
 	row := conn.QueryRowxContext(
 		ctx,
-		`INSERT INTO sources (name, feed_url, priority, insecure)
-					VALUES ($1, $2, $3, $4) RETURNING id;`,
-		source.Name, source.FeedURL, source.Priority, source.Insecure,
+		`INSERT INTO sources (name, feed_url, priority, insecure, source_type, scraper_config)
+					VALUES ($1, $2, $3, $4, $5, $6) RETURNING id;`,
+		source.Name, source.FeedURL, source.Priority, source.Insecure, source.SourceType, scraperCfg,
 	)
 
 	if err := row.Err(); err != nil {
@@ -101,11 +110,53 @@ func (s *SourcePostgresStorage) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+type dbScraperConfig struct {
+	model.ScraperConfig
+}
+
+func (c *dbScraperConfig) Scan(src any) error {
+	if src == nil {
+		return nil
+	}
+	b, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("dbScraperConfig: expected []byte, got %T", src)
+	}
+	return json.Unmarshal(b, &c.ScraperConfig)
+}
+
+func (c dbScraperConfig) Value() (driver.Value, error) {
+	b, err := json.Marshal(c.ScraperConfig)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
 type dbSource struct {
-	ID        int64     `db:"id"`
-	Name      string    `db:"name"`
-	FeedURL   string    `db:"feed_url"`
-	Priority  int       `db:"priority"`
-	Insecure  bool      `db:"insecure"`
-	CreatedAt time.Time `db:"created_at"`
+	ID            int64           `db:"id"`
+	Name          string          `db:"name"`
+	FeedURL       string          `db:"feed_url"`
+	Priority      int             `db:"priority"`
+	Insecure      bool            `db:"insecure"`
+	SourceType    string          `db:"source_type"`
+	ScraperConfig *dbScraperConfig `db:"scraper_config"`
+	CreatedAt     time.Time       `db:"created_at"`
+}
+
+func (s dbSource) toModel() model.Source {
+	m := model.Source{
+		ID:         s.ID,
+		Name:       s.Name,
+		FeedURL:    s.FeedURL,
+		Priority:   s.Priority,
+		Insecure:   s.Insecure,
+		SourceType: s.SourceType,
+		CreatedAt:  s.CreatedAt,
+	}
+	if s.ScraperConfig != nil {
+		cfg := s.ScraperConfig.ScraperConfig
+		m.ScraperConfig = &cfg
+	}
+	return m
 }

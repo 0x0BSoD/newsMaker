@@ -148,8 +148,9 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 		totalNew      int
 		totalTrending int
 		// allFullNames collects every repo seen this run for MarkPosted.
-		allFullNames     []string
-		trendingInputBuf strings.Builder
+		allFullNames      []string
+		trendingInputBuf  strings.Builder
+		trendingOutputBuf strings.Builder
 	)
 
 	for _, topic := range d.topics {
@@ -200,6 +201,7 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 			slog.Error("summarize failed", "topic", topic, "err", err)
 			summary = ""
 		}
+		trendingOutputBuf.WriteString(fmt.Sprintf("### %s\n\n%s\n\n---\n\n", topic, summary))
 
 		results = append(results, topicResult{
 			topic:    topic,
@@ -213,6 +215,7 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 	}
 
 	writeSummaryInput(d.summaryInputDir, "trending.txt", trendingInputBuf.String())
+	writeSummaryInput(d.summaryInputDir, "trending_output.txt", trendingOutputBuf.String())
 
 	msg := tgbotapi.NewMessage(channelID, buildTelegramMessage(results, totalNew, totalTrending, hasLastPosted))
 	msg.ParseMode = "HTML"
