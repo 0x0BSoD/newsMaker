@@ -39,6 +39,7 @@ type Notifier struct {
 	retryInterval   time.Duration
 	maxRetries      int
 	summaryInputDir string
+	maxInputDataLen int
 }
 
 func New(
@@ -55,6 +56,7 @@ func New(
 	retryInterval time.Duration,
 	maxRetries int,
 	summaryInputDir string,
+	maxInputDataLen int,
 ) *Notifier {
 	return &Notifier{
 		articles:        articleProvider,
@@ -70,6 +72,7 @@ func New(
 		retryInterval:   retryInterval,
 		maxRetries:      maxRetries,
 		summaryInputDir: summaryInputDir,
+		maxInputDataLen: maxInputDataLen,
 	}
 }
 
@@ -186,7 +189,7 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 	slog.Info("building digest", "articles", len(articles), "slot", greeting, "channel", channelID, "markPosted", markPosted)
 
 	grouped := groupByTheme(articles)
-	digestInput := buildDigestInput(greeting, grouped)
+	digestInput := buildDigestInput(greeting, grouped, n.maxInputDataLen)
 
 	writeSummaryInput(n.summaryInputDir, "digest.txt", digestInput)
 
@@ -240,7 +243,7 @@ func groupByTheme(articles []model.Article) map[string][]model.Article {
 }
 
 // buildDigestInput constructs the structured text passed to the LLM.
-func buildDigestInput(greeting string, grouped map[string][]model.Article) string {
+func buildDigestInput(greeting string, grouped map[string][]model.Article, maxDataLen int) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Time of day: %s\n\n", greeting))
 	sb.WriteString("Articles by topic:\n\n")
@@ -249,8 +252,8 @@ func buildDigestInput(greeting string, grouped map[string][]model.Article) strin
 		sb.WriteString(fmt.Sprintf("Topic: %s\n", theme))
 		for _, a := range articles {
 			summary := a.Summary
-			if len(summary) > 200 {
-				summary = summary[:200] + "..."
+			if len(summary) > maxDataLen {
+				summary = summary[:maxDataLen] + "..."
 			}
 			if summary != "" {
 				sb.WriteString(fmt.Sprintf("- %s <%s> — %s\n", a.Title, a.Link, summary))

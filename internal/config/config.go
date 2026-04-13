@@ -26,6 +26,7 @@ type Config struct {
 	NewsDigestMaxArticles   int           `hcl:"news_digest_max_articles" env:"NEWS_DIGEST_MAX_ARTICLES" default:"30"`
 	NewsDigestRetryInterval time.Duration `hcl:"news_digest_retry_interval" env:"NEWS_DIGEST_RETRY_INTERVAL" default:"5m"`
 	NewsDigestMaxRetries    int           `hcl:"news_digest_max_retries" env:"NEWS_DIGEST_MAX_RETRIES" default:"3"`
+	NewsDigestMaxDataLen    int           `hcl:"news_digest_max_data_len" env:"NEWS_DIGEST_MAX_DATA_LEN" default:"500"`
 	SummaryInputDir         string        `hcl:"summary_input_dir" env:"SUMMARY_INPUT_DIR" default:""`
 	NewsDigestPrompt        string        `hcl:"news_digest_prompt" env:"NEWS_DIGEST_PROMPT" default:"You are a tech news digest writer for a Telegram channel. Given articles grouped by topic and time of day, write an engaging news digest in Telegram HTML format. Start with 'Good morning!' or 'Good evening!' matching the time of day indicated in the input. Briefly introduce what is happening, then for each topic write a short bold header using <b>Topic</b> and list articles as bullet points using the format: • <a href='URL'>Title</a> — one sentence description. Keep it concise and friendly. Output only the final message text, no extra commentary."`
 	DatabaseDSN             string        `hcl:"database_dsn" env:"DATABASE_DSN" default:"postgres://postgres:postgres@localhost:5432/news?sslmode=disable"`

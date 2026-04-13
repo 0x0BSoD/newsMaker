@@ -134,6 +134,7 @@ func main() {
 			cfg.NewsDigestRetryInterval,
 			cfg.NewsDigestMaxRetries,
 			summaryInputDir,
+			cfg.NewsDigestMaxDataLen,
 		)
 		fetcher = fetcher.New(
 			articleStorage,
