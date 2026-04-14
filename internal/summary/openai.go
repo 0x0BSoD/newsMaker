@@ -15,6 +15,11 @@ type OpenAISummarizer struct {
 	timeout time.Duration
 }
 
+func (o *OpenAISummarizer) CountTokens(text string) (int, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // NewOpenAISummarizer creates a summarizer backed by any OpenAI-compatible API.
 // Set baseURL to a non-empty string to point at a local server (LM Studio,
 // llama.cpp, Ollama's /v1 endpoint, etc.); leave empty for api.openai.com.

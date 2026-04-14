@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	tiktoken "github.com/hupe1980/go-tiktoken"
 	"github.com/ollama/ollama/api"
 )
 
@@ -17,6 +18,21 @@ type OllamaSummarizer struct {
 	model   string
 	timeout time.Duration
 	mu      sync.Mutex
+}
+
+// CountTokens Simple estimation of token usage
+func (o *OllamaSummarizer) CountTokens(text string) (int, error) {
+	enc, err := tiktoken.NewEncodingForModel("ada")
+	if err != nil {
+		return 0, err
+	}
+
+	_, tokens, err := enc.Encode(text, nil, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	return len(tokens), nil
 }
 
 func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *OllamaSummarizer {

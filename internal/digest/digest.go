@@ -28,6 +28,7 @@ type RepoStorage interface {
 // Summarizer is satisfied by the Ollama / OpenAI summarizer implementations.
 type Summarizer interface {
 	Summarize(text string) (string, error)
+	CountTokens(text string) (int, error)
 }
 
 type Digest struct {
@@ -217,7 +218,13 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 	writeSummaryInput(d.summaryInputDir, "trending.txt", trendingInputBuf.String())
 	writeSummaryInput(d.summaryInputDir, "trending_output.txt", trendingOutputBuf.String())
 
-	msg := tgbotapi.NewMessage(channelID, buildTelegramMessage(results, totalNew, totalTrending, hasLastPosted))
+	msgData := buildTelegramMessage(results, totalNew, totalTrending, hasLastPosted)
+	if msgData == "empty" {
+		slog.Warn("buildTelegramMessage empty message")
+		// Basically it is not an error, so just return
+		return nil
+	}
+	msg := tgbotapi.NewMessage(channelID, msgData)
 	msg.ParseMode = "HTML"
 	msg.DisableWebPagePreview = true
 
@@ -253,9 +260,12 @@ func buildTelegramMessage(results []topicResult, totalNew, totalTrending int, ha
 		))
 	}
 
+	lenResults := len(results)
+	var resultsMissCounter int
 	for _, r := range results {
 		if len(r.newRepos) == 0 && len(r.trending) == 0 {
-			sb.WriteString(fmt.Sprintf("\n<b>%s:</b> no changes this week\n", r.topic))
+			// sb.WriteString(fmt.Sprintf("\n<b>%s:</b> no changes this week\n", r.topic))
+			resultsMissCounter++
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("\n<b>%s:</b> %d new, %d trending\n", r.topic, len(r.newRepos), len(r.trending)))
@@ -265,6 +275,10 @@ func buildTelegramMessage(results []topicResult, totalNew, totalTrending int, ha
 		if r.pageURL != "" {
 			sb.WriteString(fmt.Sprintf("\n<a href=\"%s\">View on Telegraph</a>\n", r.pageURL))
 		}
+	}
+
+	if resultsMissCounter == lenResults {
+		return "empty"
 	}
 
 	return sb.String()

@@ -23,6 +23,7 @@ type ArticleProvider interface {
 
 type Summarizer interface {
 	Summarize(text string) (string, error)
+	CountTokens(text string) (int, error)
 }
 
 type Notifier struct {
@@ -192,6 +193,12 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 	digestInput := buildDigestInput(greeting, grouped, n.maxInputDataLen)
 
 	writeSummaryInput(n.summaryInputDir, "digest.txt", digestInput)
+
+	tokens, err := n.summarizer.CountTokens(digestInput)
+	if err != nil {
+		slog.Warn("summarizer.CountTokens", "err", err)
+	}
+	slog.Info("done digest input", "articles", len(articles), "slot", greeting, "channel", channelID, "tokens", tokens, "markPosted", markPosted)
 
 	digestText, err := n.summarizer.Summarize(digestInput)
 	if err != nil || strings.TrimSpace(digestText) == "" {
