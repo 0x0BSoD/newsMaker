@@ -6,7 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/SlyMarbo/rss v1.0.5
 	github.com/cristalhq/aconfig v0.19.0
-	github.com/cristalhq/aconfig/aconfighcl v0.17.1
+	github.com/cristalhq/aconfig/aconfigyaml v0.17.1
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/hupe1980/go-tiktoken v0.0.10
 	github.com/lib/pq v1.10.9
@@ -23,7 +23,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

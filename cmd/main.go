@@ -49,7 +49,7 @@ func main() {
 		}
 	}
 
-	botAPI, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
+	botAPI, err := tgbotapi.NewBotAPI(cfg.Telegram.BotToken)
 	if err != nil {
 		slog.Error("failed to create bot API", "err", err)
 		return
@@ -62,8 +62,8 @@ func main() {
 	}
 	defer db.Close()
 
-	githubClient := github.NewClient(cfg.GitHubToken)
-	telegraphClient := telegraph.NewClient(cfg.TelegraphToken)
+	githubClient := github.NewClient(cfg.GitHub.Token)
+	telegraphClient := telegraph.NewClient(cfg.Telegram.TelegraphToken)
 	repoStorage := storage.NewGitHubRepoStorage(db)
 
 	var (
@@ -71,51 +71,51 @@ func main() {
 		newsDigestSummarizer notifier.Summarizer
 	)
 
-	switch cfg.AIType {
+	switch cfg.LLM.Type {
 	case "openai":
-		if cfg.AIKey == "" {
+		if cfg.LLM.Key == "" {
 			slog.Error("ai_key is required when ai_type is openai")
 			return
 		}
 		digestSummarizer = summary.NewOpenAISummarizer(
-			cfg.AIBaseURL,
-			cfg.AIKey,
-			cfg.DigestSummaryPrompt,
-			cfg.AIModel,
-			cfg.AITimeout,
+			cfg.LLM.BaseURL,
+			cfg.LLM.Key,
+			cfg.Digest.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
 		)
 		newsDigestSummarizer = summary.NewOpenAISummarizer(
-			cfg.AIBaseURL,
-			cfg.AIKey,
-			cfg.NewsDigestPrompt,
-			cfg.AIModel,
-			cfg.AITimeout,
+			cfg.LLM.BaseURL,
+			cfg.LLM.Key,
+			cfg.News.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
 		)
-		slog.Info("summarizers ready", "type", "openai", "model", cfg.AIModel)
+		slog.Info("summarizers ready", "type", "openai", "model", cfg.LLM.Model)
 	default:
-		if cfg.AIBaseURL == "" {
+		if cfg.LLM.BaseURL == "" {
 			slog.Error("ai_base_url is required when ai_type is ollama")
 			return
 		}
 		digestSummarizer = summary.NewOllamaSummarizer(
-			cfg.AIBaseURL,
-			cfg.DigestSummaryPrompt,
-			cfg.AIModel,
-			cfg.AITimeout,
+			cfg.LLM.BaseURL,
+			cfg.Digest.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
 		)
 		newsDigestSummarizer = summary.NewOllamaSummarizer(
-			cfg.AIBaseURL,
-			cfg.NewsDigestPrompt,
-			cfg.AIModel,
-			cfg.AITimeout,
+			cfg.LLM.BaseURL,
+			cfg.News.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
 		)
-		slog.Info("summarizers ready", "type", "ollama", "model", cfg.AIModel)
+		slog.Info("summarizers ready", "type", "ollama", "model", cfg.LLM.Model)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	rep := reporter.New(botAPI, cfg.TelegramAdminChatID)
+	rep := reporter.New(botAPI, cfg.Telegram.AdminChatID)
 
 	var (
 		articleStorage = storage.NewArticleStorage(db)
@@ -124,17 +124,17 @@ func main() {
 			articleStorage,
 			newsDigestSummarizer,
 			botAPI,
-			cfg.NewsDigestMorningHour,
-			cfg.NewsDigestNoonHour,
-			cfg.NewsDigestEveningHour,
-			cfg.NewsDigestLookback,
-			cfg.NewsDigestMaxArticles,
-			cfg.TelegramChannelID,
+			cfg.News.MorningHour,
+			cfg.News.NoonHour,
+			cfg.News.EveningHour,
+			cfg.News.Lookback,
+			cfg.News.MaxArticles,
+			cfg.Telegram.ChannelID,
 			rep,
-			cfg.NewsDigestRetryInterval,
-			cfg.NewsDigestMaxRetries,
+			cfg.News.RetryInterval,
+			cfg.News.MaxRetries,
 			summaryInputDir,
-			cfg.NewsDigestMaxDataLen,
+			cfg.News.MaxDataLen,
 		)
 		fetcher = fetcher.New(
 			articleStorage,
@@ -143,79 +143,62 @@ func main() {
 			cfg.FilterKeywords,
 			rep,
 		)
-		digest = digest.New(
-			githubClient,
-			telegraphClient,
-			botAPI,
-			repoStorage,
-			digestSummarizer,
-			cfg.TelegramChannelID,
-			cfg.GitHubTopics,
-			cfg.DigestInterval,
-			summaryInputDir,
-		)
 	)
 
 	// Fall back to the admin chat if no dedicated test channel is configured.
-	testChannelID := cfg.TelegramTestChannelID
+	testChannelID := cfg.Telegram.TestChannelID
 	if testChannelID == 0 {
-		testChannelID = cfg.TelegramAdminChatID
+		testChannelID = cfg.Telegram.AdminChatID
 	}
 
 	newsBot := botkit.New(botAPI)
-	newsBot.RegisterCmdView(
-		"testdigest",
-		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
-			bot.ViewCmdTestDigest(digest, testChannelID),
-		),
-	)
+
 	newsBot.RegisterCmdView(
 		"testnews",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdTestNews(notifier, testChannelID),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"repostnews",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdRepostNews(notifier),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"addsource",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdAddSource(sourceStorage, newsBot),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"setpriority",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdSetPriority(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"getsource",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdGetSource(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"listsources",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdListSource(sourceStorage),
 		),
 	)
 	newsBot.RegisterCmdView(
 		"deletesource",
 		middleware.AdminsOnly(
-			cfg.TelegramChannelID,
+			cfg.Telegram.ChannelID,
 			bot.ViewCmdDeleteSource(sourceStorage),
 		),
 	)
@@ -225,16 +208,36 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	go func(ctx context.Context) {
-		if err := digest.Start(ctx); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				slog.Error("digest stopped unexpectedly", "err", err)
-				rep.Notify(fmt.Sprintf("Notifier stopped: %v", err))
-				return
+	if cfg.Digest.Enabled {
+		digest := digest.New(
+			githubClient,
+			telegraphClient,
+			botAPI,
+			repoStorage,
+			digestSummarizer,
+			cfg.Telegram.ChannelID,
+			cfg.GitHub.Topics,
+			cfg.Digest.Interval,
+			summaryInputDir,
+		)
+		newsBot.RegisterCmdView(
+			"testdigest",
+			middleware.AdminsOnly(
+				cfg.Telegram.ChannelID,
+				bot.ViewCmdTestDigest(digest, testChannelID),
+			),
+		)
+		go func(ctx context.Context) {
+			if err := digest.Start(ctx); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					slog.Error("digest stopped unexpectedly", "err", err)
+					rep.Notify(fmt.Sprintf("Notifier stopped: %v", err))
+					return
+				}
+				slog.Error("digest stopped", "err", err)
 			}
-			slog.Error("digest stopped", "err", err)
-		}
-	}(ctx)
+		}(ctx)
+	}
 
 	go func(ctx context.Context) {
 		if err := fetcher.Start(ctx); err != nil {
