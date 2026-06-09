@@ -27,7 +27,7 @@ type RepoStorage interface {
 
 // Summarizer is satisfied by the Ollama / OpenAI summarizer implementations.
 type Summarizer interface {
-	Summarize(text string) (string, error)
+	Summarize(ctx context.Context, text string) (string, error)
 	CountTokens(text string) (int, error)
 }
 
@@ -184,6 +184,13 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 			slog.Error("GetNewAndTrending failed", "topic", topic, "err", err)
 		}
 
+		// Nothing changed for this topic — skip the Telegraph page and the
+		// LLM call, buildTelegramMessage omits empty topics anyway.
+		if len(newRepos) == 0 && len(trending) == 0 {
+			results = append(results, topicResult{topic: topic})
+			continue
+		}
+
 		// Build Telegraph page for this topic (new + trending).
 		nodes := buildTopicNodes(topic, newRepos, trending)
 		pageTitle := fmt.Sprintf("%s — GitHub Digest %s", topic, time.Now().Format("2006-01-02"))
@@ -197,7 +204,7 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 		summaryInput := buildSummaryInput(topic, newRepos, trending)
 		trendingInputBuf.WriteString(summaryInput)
 		trendingInputBuf.WriteString("\n---\n\n")
-		summary, err := d.summarizer.Summarize(summaryInput)
+		summary, err := d.summarizer.Summarize(ctx, summaryInput)
 		if err != nil {
 			slog.Error("summarize failed", "topic", topic, "err", err)
 			summary = ""

@@ -231,7 +231,7 @@ func main() {
 			if err := digest.Start(ctx); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					slog.Error("digest stopped unexpectedly", "err", err)
-					rep.Notify(fmt.Sprintf("Notifier stopped: %v", err))
+					rep.Notify(fmt.Sprintf("Digest stopped: %v", err))
 					return
 				}
 				slog.Error("digest stopped", "err", err)

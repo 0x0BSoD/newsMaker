@@ -25,7 +25,6 @@ type Config struct {
 		Type    string        `yaml:"type" env:"AI_TYPE" default:"ollama"`
 		BaseURL string        `yaml:"base_url" env:"AI_BASE_URL"`
 		Key     string        `yaml:"key" env:"AI_KEY"`
-		Prompt  string        `yaml:"prompt" env:"AI_PROMPT"`
 		Model   string        `yaml:"model" env:"AI_MODEL" default:"llama3"`
 		Timeout time.Duration `yaml:"timeout" env:"AI_TIMEOUT" default:"30m"`
 	} `yaml:"LLM"`
@@ -45,11 +44,10 @@ type Config struct {
 		MaxDataLen    int           `yaml:"max_data_len" env:"NEWS_DIGEST_MAX_DATA_LEN" default:"500"`
 		Prompt        string        `yaml:"prompt" env:"NEWS_DIGEST_PROMPT" default:"You are a tech news digest writer for a Telegram channel. Given articles grouped by topic and time of day, write an engaging news digest in Telegram HTML format. Start with 'Good morning!' or 'Good evening!' matching the time of day indicated in the input. Briefly introduce what is happening, then for each topic write a short bold header using <b>Topic</b> and list articles as bullet points using the format: • <a href='URL'>Title</a> — one sentence description. Keep it concise and friendly. Output only the final message text, no extra commentary."`
 	} `yaml:"news"`
-	SummaryInputDir      string        `yaml:"summary_input_dir" env:"SUMMARY_INPUT_DIR" default:""`
-	DatabaseDSN          string        `yaml:"database_dsn" env:"DATABASE_DSN" default:"postgres://postgres:postgres@localhost:5432/news?sslmode=disable"`
-	FetchInterval        time.Duration `yaml:"fetch_interval" env:"FETCH_INTERVAL" default:"10m"`
-	NotificationInterval time.Duration `yaml:"notification_interval" env:"NOTIFICATION_INTERVAL" default:"1m"`
-	FilterKeywords       []string      `yaml:"filter_keywords" env:"FILTER_KEYWORDS"`
+	SummaryInputDir string        `yaml:"summary_input_dir" env:"SUMMARY_INPUT_DIR" default:""`
+	DatabaseDSN     string        `yaml:"database_dsn" env:"DATABASE_DSN" default:"postgres://postgres:postgres@localhost:5432/news?sslmode=disable"`
+	FetchInterval   time.Duration `yaml:"fetch_interval" env:"FETCH_INTERVAL" default:"10m"`
+	FilterKeywords  []string      `yaml:"filter_keywords" env:"FILTER_KEYWORDS"`
 }
 
 var (

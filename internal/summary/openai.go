@@ -15,9 +15,9 @@ type OpenAISummarizer struct {
 	timeout time.Duration
 }
 
+// CountTokens Simple estimation of token usage
 func (o *OpenAISummarizer) CountTokens(text string) (int, error) {
-	//TODO implement me
-	panic("implement me")
+	return estimateTokens(text)
 }
 
 // NewOpenAISummarizer creates a summarizer backed by any OpenAI-compatible API.
@@ -36,8 +36,8 @@ func NewOpenAISummarizer(baseURL, apiKey, prompt, model string, timeout time.Dur
 	}
 }
 
-func (o *OpenAISummarizer) Summarize(text string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+func (o *OpenAISummarizer) Summarize(ctx context.Context, text string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 
 	resp, err := o.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{

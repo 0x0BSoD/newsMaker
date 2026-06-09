@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	tiktoken "github.com/hupe1980/go-tiktoken"
 	"github.com/ollama/ollama/api"
 )
 
@@ -22,17 +21,7 @@ type OllamaSummarizer struct {
 
 // CountTokens Simple estimation of token usage
 func (o *OllamaSummarizer) CountTokens(text string) (int, error) {
-	enc, err := tiktoken.NewEncodingForModel("ada")
-	if err != nil {
-		return 0, err
-	}
-
-	_, tokens, err := enc.Encode(text, nil, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	return len(tokens), nil
+	return estimateTokens(text)
 }
 
 func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *OllamaSummarizer {
@@ -52,7 +41,7 @@ func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *
 	}
 }
 
-func (o *OllamaSummarizer) Summarize(text string) (string, error) {
+func (o *OllamaSummarizer) Summarize(ctx context.Context, text string) (string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -62,7 +51,7 @@ func (o *OllamaSummarizer) Summarize(text string) (string, error) {
 		Prompt: text,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 
 	var responseFlow []string

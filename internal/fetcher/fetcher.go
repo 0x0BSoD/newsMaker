@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tomakado/containers/set"
-
 	"github.com/0x0BSoD/newsMaker/internal/model"
 	"github.com/0x0BSoD/newsMaker/internal/reporter"
 	src "github.com/0x0BSoD/newsMaker/internal/source"
@@ -127,6 +125,9 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 }
 
 func (f *Fetcher) processItems(ctx context.Context, source Source, items []model.Item) error {
+	var failed int
+	var lastErr error
+
 	for _, item := range items {
 		item.Date = item.Date.UTC()
 
@@ -142,18 +143,31 @@ func (f *Fetcher) processItems(ctx context.Context, source Source, items []model
 			Categories:  item.Categories,
 			PublishedAt: item.Date,
 		}); err != nil {
-			return err
+			// Keep going: one bad item should not drop the rest of the feed.
+			slog.Error("store article failed", "source", source.Name(), "link", item.Link, "err", err)
+			failed++
+			lastErr = err
 		}
+	}
+
+	if failed > 0 {
+		return fmt.Errorf("store failed for %d of %d items, last error: %w", failed, len(items), lastErr)
 	}
 
 	return nil
 }
 
 func (f *Fetcher) itemShouldBeSkipped(item model.Item) bool {
-	categoriesSet := set.New(item.Categories...)
+	title := strings.ToLower(item.Title)
+
+	categories := make(map[string]struct{}, len(item.Categories))
+	for _, c := range item.Categories {
+		categories[strings.ToLower(c)] = struct{}{}
+	}
 
 	for _, keyword := range f.filterKeywords {
-		if categoriesSet.Contains(keyword) || strings.Contains(strings.ToLower(item.Title), keyword) {
+		kw := strings.ToLower(keyword)
+		if _, ok := categories[kw]; ok || strings.Contains(title, kw) {
 			return true
 		}
 	}

@@ -71,7 +71,7 @@ func (s *ArticlePostgresStorage) AllNotPosted(ctx context.Context, since time.Ti
 			FROM articles a JOIN sources s ON s.id = a.source_id
 			WHERE a.posted_at IS NULL
 				AND a.published_at >= $1::timestamp
-			ORDER BY a.created_at DESC, s_priority DESC LIMIT $2;`,
+			ORDER BY s.priority DESC, a.created_at DESC LIMIT $2;`,
 		since.UTC().Format(time.RFC3339),
 		limit,
 	); err != nil {
@@ -92,7 +92,11 @@ func (s *ArticlePostgresStorage) AllNotPosted(ctx context.Context, since time.Ti
 	}), nil
 }
 
-func (s *ArticlePostgresStorage) MarkAsPosted(ctx context.Context, article model.Article) error {
+func (s *ArticlePostgresStorage) MarkAsPosted(ctx context.Context, articleIDs []int64) error {
+	if len(articleIDs) == 0 {
+		return nil
+	}
+
 	conn, err := s.db.Connx(ctx)
 	if err != nil {
 		return err
@@ -101,9 +105,9 @@ func (s *ArticlePostgresStorage) MarkAsPosted(ctx context.Context, article model
 
 	if _, err := conn.ExecContext(
 		ctx,
-		`UPDATE articles SET posted_at = $1::timestamp WHERE id = $2;`,
+		`UPDATE articles SET posted_at = $1::timestamp WHERE id = ANY($2);`,
 		time.Now().UTC().Format(time.RFC3339),
-		article.ID,
+		pq.Array(articleIDs),
 	); err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,11 +19,11 @@ import (
 
 type ArticleProvider interface {
 	AllNotPosted(ctx context.Context, since time.Time, limit uint64) ([]model.Article, error)
-	MarkAsPosted(ctx context.Context, article model.Article) error
+	MarkAsPosted(ctx context.Context, articleIDs []int64) error
 }
 
 type Summarizer interface {
-	Summarize(text string) (string, error)
+	Summarize(ctx context.Context, text string) (string, error)
 	CountTokens(text string) (int, error)
 }
 
@@ -81,7 +82,7 @@ func (n *Notifier) Start(ctx context.Context) error {
 	slog.Info("notifier started (digest mode)")
 
 	for {
-		next, greeting := n.nextScheduledTime()
+		next, greeting := n.nextScheduledTime(time.Now())
 		slog.Info("next digest scheduled", "at", next, "slot", greeting)
 
 		select {
@@ -121,8 +122,7 @@ func (n *Notifier) sendWithRetry(ctx context.Context, greeting string) {
 
 // nextScheduledTime returns the next morning or evening schedule time and the
 // greeting word ("morning" or "evening") to use in the digest.
-func (n *Notifier) nextScheduledTime() (time.Time, string) {
-	now := time.Now()
+func (n *Notifier) nextScheduledTime(now time.Time) (time.Time, string) {
 	loc := now.Location()
 	y, m, d := now.Date()
 
@@ -141,7 +141,7 @@ func (n *Notifier) nextScheduledTime() (time.Time, string) {
 		}
 	}
 
-	// Both today's slots have passed — return tomorrow's morning.
+	// All of today's slots have passed — return tomorrow's morning.
 	tomorrow := now.AddDate(0, 0, 1)
 	ty, tm, td := tomorrow.Date()
 	return time.Date(ty, tm, td, n.morningHour, 0, 0, 0, loc), "morning"
@@ -154,17 +154,17 @@ func (n *Notifier) SendDigest(ctx context.Context, greeting string) error {
 // SendTestDigest sends a digest to channelID without marking articles as
 // posted, so the production article queue is not affected.
 func (n *Notifier) SendTestDigest(ctx context.Context, channelID int64) error {
-	return n.send(ctx, n.currentGreeting(), channelID, false)
+	return n.send(ctx, n.currentGreeting(time.Now()), channelID, false)
 }
 
 // Repost sends a digest to the production channel and marks articles as posted.
 // Intended for manual recovery after all automatic retry attempts have failed.
 func (n *Notifier) Repost(ctx context.Context) error {
-	return n.send(ctx, n.currentGreeting(), n.channelID, true)
+	return n.send(ctx, n.currentGreeting(time.Now()), n.channelID, true)
 }
 
-func (n *Notifier) currentGreeting() string {
-	h := time.Now().Hour()
+func (n *Notifier) currentGreeting(now time.Time) string {
+	h := now.Hour()
 	switch {
 	case h < n.noonHour:
 		return "morning"
@@ -200,7 +200,7 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 	}
 	slog.Info("done digest input", "articles", len(articles), "slot", greeting, "channel", channelID, "tokens", tokens, "markPosted", markPosted)
 
-	digestText, err := n.summarizer.Summarize(digestInput)
+	digestText, err := n.summarizer.Summarize(ctx, digestInput)
 	if err != nil || strings.TrimSpace(digestText) == "" {
 		if err != nil {
 			slog.Error("digest summarization failed, using simple fallback", "err", err)
@@ -219,17 +219,28 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 	msg.DisableWebPagePreview = true
 
 	if _, err := n.bot.Send(msg); err != nil {
-		return fmt.Errorf("send digest: %w", err)
+		// Telegram rejects the whole message on any HTML parse error; better
+		// to deliver the digest unformatted than not at all.
+		slog.Warn("HTML digest send failed, retrying as plain text", "err", err)
+		n.reporter.Notify(fmt.Sprintf("HTML digest send failed, falling back to plain text: %v", err))
+
+		plain := tgbotapi.NewMessage(channelID, markup.StripHTML(digestText))
+		plain.DisableWebPagePreview = true
+		if _, err := n.bot.Send(plain); err != nil {
+			return fmt.Errorf("send digest: %w", err)
+		}
 	}
 
 	if !markPosted {
 		return nil
 	}
 
-	for _, article := range articles {
-		if err := n.articles.MarkAsPosted(ctx, article); err != nil {
-			slog.Error("mark as posted failed", "articleID", article.ID, "err", err)
-		}
+	ids := make([]int64, len(articles))
+	for i, article := range articles {
+		ids[i] = article.ID
+	}
+	if err := n.articles.MarkAsPosted(ctx, ids); err != nil {
+		slog.Error("mark as posted failed", "articleIDs", ids, "err", err)
 	}
 
 	return nil
@@ -249,18 +260,31 @@ func groupByTheme(articles []model.Article) map[string][]model.Article {
 	return groups
 }
 
+// sortedThemes returns the group keys in a stable order so digest output does
+// not depend on map iteration order.
+func sortedThemes(grouped map[string][]model.Article) []string {
+	themes := make([]string, 0, len(grouped))
+	for theme := range grouped {
+		themes = append(themes, theme)
+	}
+	sort.Strings(themes)
+	return themes
+}
+
 // buildDigestInput constructs the structured text passed to the LLM.
 func buildDigestInput(greeting string, grouped map[string][]model.Article, maxDataLen int) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Time of day: %s\n\n", greeting))
 	sb.WriteString("Articles by topic:\n\n")
 
-	for theme, articles := range grouped {
+	for _, theme := range sortedThemes(grouped) {
 		sb.WriteString(fmt.Sprintf("Topic: %s\n", theme))
-		for _, a := range articles {
+		for _, a := range grouped[theme] {
 			summary := a.Summary
 			if len(summary) > maxDataLen {
-				summary = summary[:maxDataLen] + "..."
+				if r := []rune(summary); len(r) > maxDataLen {
+					summary = string(r[:maxDataLen]) + "..."
+				}
 			}
 			if summary != "" {
 				sb.WriteString(fmt.Sprintf("- %s <%s> — %s\n", a.Title, a.Link, summary))
@@ -288,9 +312,9 @@ func buildSimpleDigest(greeting string, grouped map[string][]model.Article) stri
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Good %s! Here's your tech news digest:\n\n", greeting))
 
-	for theme, articles := range grouped {
+	for _, theme := range sortedThemes(grouped) {
 		sb.WriteString(fmt.Sprintf("<b>%s</b>\n", markup.EscapeForHTML(theme)))
-		for _, a := range articles {
+		for _, a := range grouped[theme] {
 			sb.WriteString(fmt.Sprintf("• <a href=\"%s\">%s</a>\n", a.Link, markup.EscapeForHTML(a.Title)))
 		}
 		sb.WriteString("\n")

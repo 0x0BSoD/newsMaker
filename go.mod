@@ -13,7 +13,6 @@ require (
 	github.com/ollama/ollama v0.16.3
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/stretchr/testify v1.10.0
-	github.com/tomakado/containers v0.0.0-20230201144544-f093171e88cf
 )
 
 require (

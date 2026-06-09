@@ -49,6 +49,11 @@ func (b *Bot) ClearMsgHandler(chatID int64) {
 	delete(b.msgHandlers, chatID)
 }
 
+// updateTimeout bounds a single update's handling. It is generous because
+// LLM-backed commands (/testnews, /testdigest) can run for many minutes; the
+// summarizers enforce their own tighter timeouts on top.
+const updateTimeout = 30 * time.Minute
+
 func (b *Bot) Run(ctx context.Context) error {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -58,9 +63,13 @@ func (b *Bot) Run(ctx context.Context) error {
 	for {
 		select {
 		case update := <-updates:
-			updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			b.handleUpdate(updateCtx, update)
-			updateCancel()
+			// Handle concurrently so a slow command (e.g. an LLM-backed test
+			// digest) does not block every other command.
+			go func(update tgbotapi.Update) {
+				updateCtx, updateCancel := context.WithTimeout(ctx, updateTimeout)
+				defer updateCancel()
+				b.handleUpdate(updateCtx, update)
+			}(update)
 		case <-ctx.Done():
 			return ctx.Err()
 		}

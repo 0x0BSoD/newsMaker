@@ -1,6 +1,7 @@
 package markup
 
 import (
+	"html"
 	"regexp"
 	"strings"
 )
@@ -92,11 +93,155 @@ func EscapeForHTML(src string) string {
 // brTag matches <br>, <br/>, <br /> in any case.
 var brTag = regexp.MustCompile(`(?i)<br\s*/?>`)
 
-// SanitizeTelegramHTML cleans LLM-generated text before embedding it into a
-// Telegram HTML message. It converts <br> to newlines and strips all other
-// HTML tags (the LLM should not produce Telegram HTML; the caller adds its own
-// structural tags around the summary).
+// allowedTags is the tag set Telegram accepts in HTML parse mode
+// (https://core.telegram.org/bots/api#html-style).
+var allowedTags = map[string]bool{
+	"b": true, "strong": true,
+	"i": true, "em": true,
+	"u": true, "ins": true,
+	"s": true, "strike": true, "del": true,
+	"a":    true,
+	"code": true, "pre": true,
+	"blockquote": true,
+	"tg-spoiler": true,
+}
+
+var (
+	tagPattern  = regexp.MustCompile(`<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9-]*)([^<>]*)>`)
+	hrefPattern = regexp.MustCompile(`(?i)href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
+	// codeFence matches LLM output wrapped in a markdown code block.
+	codeFence = regexp.MustCompile("(?s)^\\s*```[a-zA-Z]*\\n?(.*?)\\n?```\\s*$")
+	// entityPrefix matches an already-encoded HTML entity at the start of a string.
+	entityPrefix = regexp.MustCompile(`^&(?:[a-zA-Z]+|#[0-9]+|#x[0-9a-fA-F]+);`)
+)
+
+// SanitizeTelegramHTML cleans LLM-generated text so it can be sent as a
+// Telegram HTML message without being rejected by the API:
+//   - strips a surrounding markdown code fence, if any
+//   - converts <br> variants to newlines
+//   - keeps only tags Telegram supports (dropping all attributes except a's
+//     href), removes everything else (<p>, <ul>, …) while keeping their text
+//   - drops stray closing tags and closes tags left open
+//   - escapes bare <, > and & in text (already-encoded entities are kept)
 func SanitizeTelegramHTML(s string) string {
+	if m := codeFence.FindStringSubmatch(s); m != nil {
+		s = m[1]
+	}
 	s = brTag.ReplaceAllString(s, "\n")
-	return s
+
+	var (
+		b     strings.Builder
+		stack []string
+		last  int
+	)
+
+	for _, m := range tagPattern.FindAllStringSubmatchIndex(s, -1) {
+		b.WriteString(escapeText(s[last:m[0]]))
+		last = m[1]
+
+		closing := m[3] > m[2] // group 1 ("/") is non-empty
+		name := strings.ToLower(s[m[4]:m[5]])
+		attrs := s[m[6]:m[7]]
+
+		if !allowedTags[name] {
+			continue
+		}
+
+		if closing {
+			// Pop to the matching open tag, closing anything opened inside it;
+			// a closer with no matching opener is dropped.
+			for i := len(stack) - 1; i >= 0; i-- {
+				if stack[i] == name {
+					for j := len(stack) - 1; j >= i; j-- {
+						writeCloseTag(&b, stack[j])
+					}
+					stack = stack[:i]
+					break
+				}
+			}
+			continue
+		}
+
+		if strings.HasSuffix(strings.TrimSpace(attrs), "/") {
+			continue // self-closing inline tag carries no content
+		}
+
+		if name == "a" {
+			href := extractHref(attrs)
+			if href == "" {
+				continue // anchor without href is invalid for Telegram
+			}
+			b.WriteString(`<a href="`)
+			b.WriteString(escapeAttr(href))
+			b.WriteString(`">`)
+			stack = append(stack, name)
+			continue
+		}
+
+		b.WriteByte('<')
+		b.WriteString(name)
+		b.WriteByte('>')
+		stack = append(stack, name)
+	}
+
+	b.WriteString(escapeText(s[last:]))
+	for i := len(stack) - 1; i >= 0; i-- {
+		writeCloseTag(&b, stack[i])
+	}
+
+	return b.String()
+}
+
+func writeCloseTag(b *strings.Builder, name string) {
+	b.WriteString("</")
+	b.WriteString(name)
+	b.WriteByte('>')
+}
+
+// StripHTML removes all HTML tags and decodes entities, for use as a
+// plain-text fallback when Telegram rejects the HTML version of a message.
+func StripHTML(s string) string {
+	s = brTag.ReplaceAllString(s, "\n")
+	s = tagPattern.ReplaceAllString(s, "")
+	return html.UnescapeString(s)
+}
+
+func extractHref(attrs string) string {
+	m := hrefPattern.FindStringSubmatch(attrs)
+	if m == nil {
+		return ""
+	}
+	for _, g := range m[1:] {
+		if g != "" {
+			return g
+		}
+	}
+	return ""
+}
+
+// escapeText escapes <, > and bare & for Telegram HTML; & that already starts
+// a valid entity is left as is to avoid double-escaping LLM output.
+func escapeText(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '&':
+			if entityPrefix.MatchString(s[i:]) {
+				b.WriteByte('&')
+			} else {
+				b.WriteString("&amp;")
+			}
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+func escapeAttr(s string) string {
+	return strings.ReplaceAll(escapeText(s), `"`, "&quot;")
 }

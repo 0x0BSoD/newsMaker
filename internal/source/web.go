@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -124,6 +125,7 @@ func (s WebSource) enrichArticle(ctx context.Context, link string) model.Item {
 	parsed, err := parser.Parse(ctx, link)
 	if err != nil {
 		// Degrade gracefully: store the URL with slug title so dedup still works.
+		slog.Warn("article enrichment failed", "source", s.SourceName, "link", link, "err", err)
 		item.Title = slugToTitle(link)
 		return item
 	}
