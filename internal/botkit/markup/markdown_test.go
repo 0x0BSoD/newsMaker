@@ -1,7 +1,9 @@
 package markup
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -89,6 +91,46 @@ func TestSanitizeTelegramHTML(t *testing.T) {
 			assert.Equal(t, tt.want, SanitizeTelegramHTML(tt.in))
 		})
 	}
+}
+
+func TestSplitMessage(t *testing.T) {
+	t.Run("short message returned as is", func(t *testing.T) {
+		assert.Equal(t, []string{"hello\nworld"}, SplitMessage("hello\nworld", 100))
+	})
+
+	t.Run("splits at newline boundaries", func(t *testing.T) {
+		in := "line one\nline two\nline three"
+		got := SplitMessage(in, 20)
+
+		assert.Equal(t, []string{"line one\nline two", "line three"}, got)
+	})
+
+	t.Run("hard-splits an oversized line", func(t *testing.T) {
+		in := strings.Repeat("é", 25) // multibyte to catch byte-based slicing
+		got := SplitMessage(in, 10)
+
+		assert.Equal(t, []string{
+			strings.Repeat("é", 10),
+			strings.Repeat("é", 10),
+			strings.Repeat("é", 5),
+		}, got)
+	})
+
+	t.Run("no chunk exceeds the limit and content is preserved", func(t *testing.T) {
+		var sb strings.Builder
+		for range 300 {
+			sb.WriteString("• <a href=\"https://example.com\">Some article title</a> — description\n")
+		}
+		in := strings.TrimRight(sb.String(), "\n")
+
+		got := SplitMessage(in, TelegramMessageLimit)
+
+		assert.Greater(t, len(got), 1)
+		for _, chunk := range got {
+			assert.LessOrEqual(t, utf8.RuneCountInString(chunk), TelegramMessageLimit)
+		}
+		assert.Equal(t, in, strings.Join(got, "\n"))
+	})
 }
 
 func TestStripHTML(t *testing.T) {

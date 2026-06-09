@@ -231,12 +231,27 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 		// Basically it is not an error, so just return
 		return nil
 	}
-	msg := tgbotapi.NewMessage(channelID, msgData)
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
+	chunks := markup.SplitMessage(msgData, markup.TelegramMessageLimit)
+	for _, chunk := range chunks {
+		if len(chunks) > 1 {
+			// Re-balance tags that a chunk boundary may have split.
+			chunk = markup.SanitizeTelegramHTML(chunk)
+		}
 
-	if _, err := d.bot.Send(msg); err != nil {
-		return fmt.Errorf("send telegram message: %w", err)
+		msg := tgbotapi.NewMessage(channelID, chunk)
+		msg.ParseMode = "HTML"
+		msg.DisableWebPagePreview = true
+
+		if _, err := d.bot.Send(msg); err != nil {
+			// Better to deliver the digest unformatted than not at all.
+			slog.Warn("HTML digest send failed, retrying as plain text", "err", err)
+
+			plain := tgbotapi.NewMessage(channelID, markup.StripHTML(chunk))
+			plain.DisableWebPagePreview = true
+			if _, err := d.bot.Send(plain); err != nil {
+				return fmt.Errorf("send telegram message: %w", err)
+			}
+		}
 	}
 
 	if !markPosted {

@@ -214,20 +214,28 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 		digestText = markup.SanitizeTelegramHTML(digestText)
 	}
 
-	msg := tgbotapi.NewMessage(channelID, digestText)
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
+	chunks := markup.SplitMessage(digestText, markup.TelegramMessageLimit)
+	for _, chunk := range chunks {
+		if len(chunks) > 1 {
+			// Re-balance tags that a chunk boundary may have split.
+			chunk = markup.SanitizeTelegramHTML(chunk)
+		}
 
-	if _, err := n.bot.Send(msg); err != nil {
-		// Telegram rejects the whole message on any HTML parse error; better
-		// to deliver the digest unformatted than not at all.
-		slog.Warn("HTML digest send failed, retrying as plain text", "err", err)
-		n.reporter.Notify(fmt.Sprintf("HTML digest send failed, falling back to plain text: %v", err))
+		msg := tgbotapi.NewMessage(channelID, chunk)
+		msg.ParseMode = "HTML"
+		msg.DisableWebPagePreview = true
 
-		plain := tgbotapi.NewMessage(channelID, markup.StripHTML(digestText))
-		plain.DisableWebPagePreview = true
-		if _, err := n.bot.Send(plain); err != nil {
-			return fmt.Errorf("send digest: %w", err)
+		if _, err := n.bot.Send(msg); err != nil {
+			// Telegram rejects the whole message on any HTML parse error;
+			// better to deliver the digest unformatted than not at all.
+			slog.Warn("HTML digest send failed, retrying as plain text", "err", err)
+			n.reporter.Notify(fmt.Sprintf("HTML digest send failed, falling back to plain text: %v", err))
+
+			plain := tgbotapi.NewMessage(channelID, markup.StripHTML(chunk))
+			plain.DisableWebPagePreview = true
+			if _, err := n.bot.Send(plain); err != nil {
+				return fmt.Errorf("send digest: %w", err)
+			}
 		}
 	}
 

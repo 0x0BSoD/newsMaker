@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jmoiron/sqlx"
@@ -205,6 +206,13 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		pingCtx, pingCancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer pingCancel()
+
+		if err := db.PingContext(pingCtx); err != nil {
+			http.Error(w, "database unreachable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -261,11 +269,20 @@ func main() {
 		}
 	}(ctx)
 
+	healthSrv := &http.Server{Addr: "127.0.0.1:8088", Handler: mux}
+
+	go func() {
+		if err := healthSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("http server stopped unexpectedly", "err", err)
+		}
+	}()
+
 	go func(ctx context.Context) {
-		if err := http.ListenAndServe("127.0.0.1:8088", mux); err != nil {
-			if !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("http server stopped unexpectedly", "err", err)
-			}
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := healthSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("http server shutdown failed", "err", err)
 		}
 	}(ctx)
 

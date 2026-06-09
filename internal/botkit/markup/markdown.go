@@ -4,6 +4,7 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // boldPattern matches **text** (standard markdown bold).
@@ -196,6 +197,62 @@ func writeCloseTag(b *strings.Builder, name string) {
 	b.WriteString("</")
 	b.WriteString(name)
 	b.WriteByte('>')
+}
+
+// TelegramMessageLimit is the maximum message text length the Bot API
+// accepts. The split limit is slightly lower to leave headroom for closing
+// tags Telegram counts after parsing.
+const TelegramMessageLimit = 4000
+
+// SplitMessage splits s into chunks of at most limit runes, breaking at
+// newline boundaries so Telegram HTML lines (bullets, headers) stay intact.
+// A single line longer than limit is hard-split. Tag pairs spanning multiple
+// lines may end up unbalanced across chunks; sanitize each chunk if that
+// matters for the parse mode used.
+func SplitMessage(s string, limit int) []string {
+	if utf8.RuneCountInString(s) <= limit {
+		return []string{s}
+	}
+
+	var (
+		chunks []string
+		cur    strings.Builder
+		curLen int
+	)
+	flush := func() {
+		if curLen > 0 {
+			chunks = append(chunks, strings.TrimRight(cur.String(), "\n"))
+			cur.Reset()
+			curLen = 0
+		}
+	}
+
+	for line := range strings.SplitSeq(s, "\n") {
+		lineLen := utf8.RuneCountInString(line) + 1 // +1 for the newline
+
+		if lineLen > limit {
+			flush()
+			r := []rune(line)
+			for len(r) > limit {
+				chunks = append(chunks, string(r[:limit]))
+				r = r[limit:]
+			}
+			cur.WriteString(string(r))
+			cur.WriteByte('\n')
+			curLen = len(r) + 1
+			continue
+		}
+
+		if curLen+lineLen > limit {
+			flush()
+		}
+		cur.WriteString(line)
+		cur.WriteByte('\n')
+		curLen += lineLen
+	}
+	flush()
+
+	return chunks
 }
 
 // StripHTML removes all HTML tags and decodes entities, for use as a
