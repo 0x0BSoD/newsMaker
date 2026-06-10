@@ -1,0 +1,21 @@
+<rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0">
+    <channel>
+        <title>Auto-refreshing Official CVE Feed</title>
+        <link>https://kubernetes.io/docs/reference/issues-security/official-cve-feed/</link>
+        <description>Auto-refreshing official CVE feed for Kubernetes repository</description>
+        <item>
+            <title>CVE-2024-9042</title>
+            <link>https://github.com/kubernetes/kubernetes/issues/111</link>
+            <guid>https://www.cve.org/cverecord?id=CVE-2024-9042</guid>
+            <pubDate>Wed, 15 Jan 2025 22:28:29 +0000</pubDate>
+            <description>Command Injection affecting Windows nodes</description>
+        </item>
+        <item>
+            <title>CVE-2023-5528</title>
+            <link>https://github.com/kubernetes/kubernetes/issues/222</link>
+            <guid>https://www.cve.org/cverecord?id=CVE-2023-5528</guid>
+            <pubDate>Tue, 14 Nov 2023 18:48:23 +0000</pubDate>
+            <description>Insufficient input sanitization in in-tree storage plugin</description>
+        </item>
+    </channel>
+</rss>

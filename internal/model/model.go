@@ -29,6 +29,12 @@ type ScraperConfig struct {
 const (
 	SourceTypeRSS = "rss"
 	SourceTypeWeb = "web"
+	// SourceTypeK8sKEP is an RSS source backed by the kubernetes/enhancements
+	// commits feed; items are enriched with KEP metadata from the repo.
+	SourceTypeK8sKEP = "k8s-kep"
+	// SourceTypeK8sCVE is an RSS source backed by the official Kubernetes CVE
+	// feed; items are enriched with details from the linked GitHub issue.
+	SourceTypeK8sCVE = "k8s-cve"
 )
 
 type Source struct {

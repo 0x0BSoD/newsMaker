@@ -45,6 +45,26 @@ func (s *ArticlePostgresStorage) Store(ctx context.Context, article model.Articl
 	return nil
 }
 
+func (s *ArticlePostgresStorage) LinkExists(ctx context.Context, link string) (bool, error) {
+	conn, err := s.db.Connx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+
+	var exists bool
+	if err := conn.GetContext(
+		ctx,
+		&exists,
+		`SELECT EXISTS(SELECT 1 FROM articles WHERE link = $1);`,
+		link,
+	); err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
 func (s *ArticlePostgresStorage) AllNotPosted(ctx context.Context, since time.Time, limit uint64) ([]model.Article, error) {
 	conn, err := s.db.Connx(ctx)
 	if err != nil {

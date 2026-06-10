@@ -40,7 +40,11 @@ func (c *Client) makeRequest(ctx context.Context, method string, url string, bod
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apikey)
+	// GitHub rejects an empty Bearer token with 401; anonymous requests
+	// (rate-limited) must omit the header entirely.
+	if c.apikey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apikey)
+	}
 	req.Header.Set("Accept", "application/vnd.github.mercy-preview+json")
 
 	return c.httpClient.Do(req)

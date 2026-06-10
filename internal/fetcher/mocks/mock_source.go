@@ -5,10 +5,9 @@ package mocks
 
 import (
 	"context"
-	"sync"
-
 	"github.com/0x0BSoD/newsMaker/internal/fetcher"
 	"github.com/0x0BSoD/newsMaker/internal/model"
+	"sync"
 )
 
 // Ensure, that SourceMock does implement fetcher.Source.

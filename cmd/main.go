@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"github.com/0x0BSoD/newsMaker/internal/fetcher"
 	"github.com/0x0BSoD/newsMaker/internal/github"
 	"github.com/0x0BSoD/newsMaker/internal/notifier"
+	"github.com/0x0BSoD/newsMaker/internal/poster"
 	"github.com/0x0BSoD/newsMaker/internal/reporter"
 	"github.com/0x0BSoD/newsMaker/internal/storage"
 	"github.com/0x0BSoD/newsMaker/internal/summary"
@@ -38,7 +40,14 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	cfg := config.Get()
+	configPath := flag.String("config", "", "Path to the configuration file")
+	flag.Parse()
+
+	cfg, err := config.Get(*configPath)
+	if err != nil {
+		slog.Error("failed to load config", "err", err)
+		return
+	}
 
 	summaryInputDir := cfg.SummaryInputDir
 	if summaryInputDir == "" {
@@ -70,6 +79,7 @@ func main() {
 	var (
 		digestSummarizer     notifier.Summarizer
 		newsDigestSummarizer notifier.Summarizer
+		postSummarizer       notifier.Summarizer
 	)
 
 	switch cfg.LLM.Type {
@@ -92,6 +102,13 @@ func main() {
 			cfg.LLM.Model,
 			cfg.LLM.Timeout,
 		)
+		postSummarizer = summary.NewOpenAISummarizer(
+			cfg.LLM.BaseURL,
+			cfg.LLM.Key,
+			cfg.Post.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
+		)
 		slog.Info("summarizers ready", "type", "openai", "model", cfg.LLM.Model)
 	default:
 		if cfg.LLM.BaseURL == "" {
@@ -107,6 +124,12 @@ func main() {
 		newsDigestSummarizer = summary.NewOllamaSummarizer(
 			cfg.LLM.BaseURL,
 			cfg.News.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
+		)
+		postSummarizer = summary.NewOllamaSummarizer(
+			cfg.LLM.BaseURL,
+			cfg.Post.Prompt,
 			cfg.LLM.Model,
 			cfg.LLM.Timeout,
 		)
@@ -143,6 +166,7 @@ func main() {
 			cfg.FetchInterval,
 			cfg.FilterKeywords,
 			rep,
+			githubClient,
 		)
 	)
 
@@ -154,6 +178,15 @@ func main() {
 
 	newsBot := botkit.New(botAPI)
 
+	linkPoster := poster.New(postSummarizer, botAPI, cfg.Telegram.ChannelID, cfg.Post.MaxContentLen)
+
+	newsBot.RegisterCmdView(
+		"post",
+		middleware.AdminsOnly(
+			cfg.Telegram.ChannelID,
+			bot.ViewCmdPost(linkPoster, newsBot),
+		),
+	)
 	newsBot.RegisterCmdView(
 		"testnews",
 		middleware.AdminsOnly(

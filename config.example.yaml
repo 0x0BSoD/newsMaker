@@ -1,0 +1,111 @@
+# newsMaker configuration example.
+#
+# Copy to one of the locations the app reads (first match wins):
+#   ./config.yaml
+#   ./config.local.yaml
+#   $HOME/.config/news-feed-bot/config.yaml
+#
+# Every value can also be overridden by an environment variable with the
+# NFB_ prefix (see the env tags in internal/config/config.go).
+
+telegram:
+  # Bot token from @BotFather. Required.
+  bot_token: "123456789:AAExampleTokenReplaceMe"
+  # Production channel the digests are posted to. Required.
+  # For channels this is a negative number, e.g. -1001234567890.
+  channel_id: -1001234567890
+  # Admin chat for error notifications and admin-only command access.
+  admin_chat_id: 123456789
+  # Channel used by /testnews and /testdigest. Falls back to admin_chat_id
+  # when unset.
+  test_channel_id: -1009876543210
+  # Token for Telegraph pages used by the GitHub digest.
+  telegraph_token: ""
+
+github:
+  # Personal access token for the GitHub API, used by the weekly digest and
+  # by k8s-kep / k8s-cve source enrichment (a plain token without scopes is
+  # enough; without it enrichment runs into the 60 req/h anonymous limit).
+  token: ""
+  # Topics queried for the weekly GitHub digest.
+  topics:
+    - kubernetes
+    - golang
+    - platform-engineering
+
+# Note: this key is literally "LLM" (uppercase) in the YAML.
+LLM:
+  # "ollama" (default) or "openai" (any OpenAI-compatible API).
+  type: ollama
+  # For ollama: host:port without scheme, e.g. "localhost:11434". Required.
+  # For openai: full URL, e.g. "https://api.openai.com/v1" or a local
+  #   OpenAI-compatible server; leave empty for api.openai.com.
+  base_url: "localhost:11434"
+  # API key, required when type is "openai".
+  key: ""
+  model: "llama3"
+  # Upper bound for a single summarization request.
+  timeout: 30m
+
+news:
+  # Daily posting slots (hours, local time).
+  morning_hour: 9
+  noon_hour: 12
+  evening_hour: 18
+  # Only unposted articles published within this window are considered.
+  lookback: 12h
+  # Maximum number of articles per digest.
+  max_articles: 30
+  # Retry behavior when sending a digest fails.
+  retry_interval: 5m
+  max_retries: 3
+  # Per-article summary text is truncated to this many characters before
+  # being passed to the LLM.
+  max_data_len: 500
+  # System prompt for the news digest summarizer.
+  prompt: >-
+    You are a tech news digest writer for a Telegram channel. Given articles
+    grouped by topic and time of day, write an engaging news digest in
+    Telegram HTML format. Start with 'Good morning!' or 'Good evening!'
+    matching the time of day indicated in the input. Briefly introduce what
+    is happening, then for each topic write a short bold header using
+    <b>Topic</b> and list articles as bullet points using the format:
+    • <a href='URL'>Title</a> — one sentence description. Keep it concise
+    and friendly. Output only the final message text, no extra commentary.
+
+post:
+  # /post command: article content is truncated to this many characters
+  # before being passed to the LLM.
+  max_content_len: 8000
+  # System prompt for the /post summarizer.
+  prompt: >-
+    You are a tech editor for a Telegram channel. Given an article (URL,
+    title, content) and an optional editor's note, write a short engaging
+    post about it in Telegram HTML format: a bold one-line header using <b>,
+    then 2-4 sentences summarizing the key points, weaving in the editor's
+    note if present. Include a link to the article using <a href='URL'>.
+    Keep it concise. Output only the final message text, no extra commentary.
+
+digest:
+  # Weekly GitHub digest (off by default).
+  enabled: false
+  interval: 168h
+  # System prompt for the GitHub digest summarizer.
+  prompt: >-
+    Summarize these GitHub repositories in 2-3 sentences, highlighting key
+    trends and notable projects:
+
+database_dsn: "postgres://postgres:postgres@localhost:5432/news?sslmode=disable"
+
+# How often RSS/web sources are polled.
+fetch_interval: 10m
+
+# Blocklist: articles whose title or RSS category matches one of these
+# keywords (case-insensitive) are skipped at fetch time.
+filter_keywords:
+  - leetcode
+  - sponsored
+
+# Directory where LLM input/output is dumped for inspection (digest.txt,
+# digest_output.txt, trending.txt, ...). Defaults to the binary's directory.
+summary_input_dir: ""

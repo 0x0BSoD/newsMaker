@@ -16,6 +16,13 @@ import (
 //go:generate moq --out=mocks/mock_article_storage.go --pkg=mocks . ArticleStorage
 type ArticleStorage interface {
 	Store(ctx context.Context, article model.Article) error
+	LinkExists(ctx context.Context, link string) (bool, error)
+}
+
+// ItemEnricher is implemented by sources that can augment a feed item with
+// additional details (extra API calls) before it is stored.
+type ItemEnricher interface {
+	Enrich(ctx context.Context, item model.Item) model.Item
 }
 
 //go:generate moq --out=mocks/mock_sources_provider.go --pkg=mocks . SourcesProvider
@@ -34,6 +41,7 @@ type Fetcher struct {
 	articles ArticleStorage
 	sources  SourcesProvider
 	reporter *reporter.Reporter
+	github   src.GitHubClient
 
 	fetchInterval  time.Duration
 	filterKeywords []string
@@ -45,11 +53,13 @@ func New(
 	fetchInterval time.Duration,
 	filterKeywords []string,
 	rep *reporter.Reporter,
+	githubClient src.GitHubClient,
 ) *Fetcher {
 	return &Fetcher{
 		articles:       articleStorage,
 		sources:        sourcesProvider,
 		reporter:       rep,
+		github:         githubClient,
 		fetchInterval:  fetchInterval,
 		filterKeywords: filterKeywords,
 	}
@@ -90,7 +100,7 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 	for _, source := range sources {
 		wg.Add(1)
 
-		s, err := newSource(source)
+		s, err := f.newSource(source)
 		if err != nil {
 			slog.Error("source init failed", "source", source.Name, "err", err)
 			f.reporter.Notify(fmt.Sprintf("Source init error [%s]: %v", source.Name, err))
@@ -124,15 +134,38 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 	return nil
 }
 
+// maxEnrichPerCycle caps enrichment API calls per source per fetch cycle.
+// Items over the cap are not stored and are picked up on a later cycle.
+const maxEnrichPerCycle = 10
+
 func (f *Fetcher) processItems(ctx context.Context, source Source, items []model.Item) error {
 	var failed int
 	var lastErr error
+
+	enricher, canEnrich := source.(ItemEnricher)
+	var enriched int
 
 	for _, item := range items {
 		item.Date = item.Date.UTC()
 
 		if f.itemShouldBeSkipped(item) {
 			continue
+		}
+
+		if canEnrich {
+			exists, err := f.articles.LinkExists(ctx, item.Link)
+			switch {
+			case err != nil:
+				// Storage hiccup: store unenriched rather than lose the item.
+				slog.Warn("link existence check failed, skipping enrichment", "source", source.Name(), "link", item.Link, "err", err)
+			case exists:
+				continue
+			case enriched >= maxEnrichPerCycle:
+				continue
+			default:
+				item = enricher.Enrich(ctx, item)
+				enriched++
+			}
 		}
 
 		if err := f.articles.Store(ctx, model.Article{
@@ -175,10 +208,14 @@ func (f *Fetcher) itemShouldBeSkipped(item model.Item) bool {
 	return false
 }
 
-func newSource(m model.Source) (Source, error) {
+func (f *Fetcher) newSource(m model.Source) (Source, error) {
 	switch m.SourceType {
 	case model.SourceTypeWeb:
 		return src.NewWebSourceFromModel(m)
+	case model.SourceTypeK8sKEP:
+		return src.NewKEPSourceFromModel(m, f.github), nil
+	case model.SourceTypeK8sCVE:
+		return src.NewCVESourceFromModel(m, f.github), nil
 	default:
 		return src.NewRSSSourceFromModel(m), nil
 	}

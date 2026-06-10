@@ -1,7 +1,6 @@
 package config
 
 import (
-	"log/slog"
 	"sync"
 	"time"
 
@@ -44,6 +43,10 @@ type Config struct {
 		MaxDataLen    int           `yaml:"max_data_len" env:"NEWS_DIGEST_MAX_DATA_LEN" default:"500"`
 		Prompt        string        `yaml:"prompt" env:"NEWS_DIGEST_PROMPT" default:"You are a tech news digest writer for a Telegram channel. Given articles grouped by topic and time of day, write an engaging news digest in Telegram HTML format. Start with 'Good morning!' or 'Good evening!' matching the time of day indicated in the input. Briefly introduce what is happening, then for each topic write a short bold header using <b>Topic</b> and list articles as bullet points using the format: • <a href='URL'>Title</a> — one sentence description. Keep it concise and friendly. Output only the final message text, no extra commentary."`
 	} `yaml:"news"`
+	Post struct {
+		MaxContentLen int    `yaml:"max_content_len" env:"POST_MAX_CONTENT_LEN" default:"8000"`
+		Prompt        string `yaml:"prompt" env:"POST_PROMPT" default:"You are a tech editor for a Telegram channel. Given an article (URL, title, content) and an optional editor's note, write a short engaging post about it in Telegram HTML format: a bold one-line header using <b>, then 2-4 sentences summarizing the key points, weaving in the editor's note if present. Include a link to the article using <a href='URL'>. Keep it concise. Output only the final message text, no extra commentary."`
+	} `yaml:"post"`
 	SummaryInputDir string        `yaml:"summary_input_dir" env:"SUMMARY_INPUT_DIR" default:""`
 	DatabaseDSN     string        `yaml:"database_dsn" env:"DATABASE_DSN" default:"postgres://postgres:postgres@localhost:5432/news?sslmode=disable"`
 	FetchInterval   time.Duration `yaml:"fetch_interval" env:"FETCH_INTERVAL" default:"10m"`
@@ -51,24 +54,38 @@ type Config struct {
 }
 
 var (
-	cfg  Config
-	once sync.Once
+	cfg     Config
+	loadErr error
+	once    sync.Once
 )
 
-func Get() Config {
-	once.Do(func() {
-		loader := aconfig.LoaderFor(&cfg, aconfig.Config{
-			EnvPrefix: "NFB",
-			Files:     []string{"./config.yaml", "./config.local.yaml", "$HOME/.config/news-feed-bot/config.yaml"},
-			FileDecoders: map[string]aconfig.FileDecoder{
-				".yaml": aconfigyaml.New(),
-			},
-		})
-
-		if err := loader.Load(); err != nil {
-			slog.Error("failed to load config", "err", err)
-		}
+func load(c *Config, configPath string) error {
+	// aconfig stops at the first file that exists, so an explicit path must
+	// replace the search list, not extend it — and it must exist.
+	places := []string{"./config.yaml", "./config.local.yaml", "$HOME/.config/news-feed-bot/config.yaml"}
+	failOnNotFound := false
+	if configPath != "" {
+		places = []string{configPath}
+		failOnNotFound = true
+	}
+	loader := aconfig.LoaderFor(c, aconfig.Config{
+		SkipFlags:          true, // config comes from YAML and NFB_* env vars only
+		EnvPrefix:          "NFB",
+		Files:              places,
+		FailOnFileNotFound: failOnNotFound,
+		FileDecoders: map[string]aconfig.FileDecoder{
+			".yaml": aconfigyaml.New(),
+			".yml":  aconfigyaml.New(),
+		},
 	})
 
-	return cfg
+	return loader.Load()
+}
+
+func Get(configPath string) (Config, error) {
+	once.Do(func() {
+		loadErr = load(&cfg, configPath)
+	})
+
+	return cfg, loadErr
 }

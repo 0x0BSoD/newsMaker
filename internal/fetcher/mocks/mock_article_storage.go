@@ -5,10 +5,9 @@ package mocks
 
 import (
 	"context"
-	"sync"
-
 	"github.com/0x0BSoD/newsMaker/internal/fetcher"
 	"github.com/0x0BSoD/newsMaker/internal/model"
+	"sync"
 )
 
 // Ensure, that ArticleStorageMock does implement fetcher.ArticleStorage.
@@ -21,6 +20,9 @@ var _ fetcher.ArticleStorage = &ArticleStorageMock{}
 //
 //		// make and configure a mocked fetcher.ArticleStorage
 //		mockedArticleStorage := &ArticleStorageMock{
+//			LinkExistsFunc: func(ctx context.Context, link string) (bool, error) {
+//				panic("mock out the LinkExists method")
+//			},
 //			StoreFunc: func(ctx context.Context, article model.Article) error {
 //				panic("mock out the Store method")
 //			},
@@ -31,11 +33,21 @@ var _ fetcher.ArticleStorage = &ArticleStorageMock{}
 //
 //	}
 type ArticleStorageMock struct {
+	// LinkExistsFunc mocks the LinkExists method.
+	LinkExistsFunc func(ctx context.Context, link string) (bool, error)
+
 	// StoreFunc mocks the Store method.
 	StoreFunc func(ctx context.Context, article model.Article) error
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// LinkExists holds details about calls to the LinkExists method.
+		LinkExists []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Link is the link argument value.
+			Link string
+		}
 		// Store holds details about calls to the Store method.
 		Store []struct {
 			// Ctx is the ctx argument value.
@@ -44,7 +56,44 @@ type ArticleStorageMock struct {
 			Article model.Article
 		}
 	}
-	lockStore sync.RWMutex
+	lockLinkExists sync.RWMutex
+	lockStore      sync.RWMutex
+}
+
+// LinkExists calls LinkExistsFunc.
+func (mock *ArticleStorageMock) LinkExists(ctx context.Context, link string) (bool, error) {
+	if mock.LinkExistsFunc == nil {
+		panic("ArticleStorageMock.LinkExistsFunc: method is nil but ArticleStorage.LinkExists was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		Link string
+	}{
+		Ctx:  ctx,
+		Link: link,
+	}
+	mock.lockLinkExists.Lock()
+	mock.calls.LinkExists = append(mock.calls.LinkExists, callInfo)
+	mock.lockLinkExists.Unlock()
+	return mock.LinkExistsFunc(ctx, link)
+}
+
+// LinkExistsCalls gets all the calls that were made to LinkExists.
+// Check the length with:
+//
+//	len(mockedArticleStorage.LinkExistsCalls())
+func (mock *ArticleStorageMock) LinkExistsCalls() []struct {
+	Ctx  context.Context
+	Link string
+} {
+	var calls []struct {
+		Ctx  context.Context
+		Link string
+	}
+	mock.lockLinkExists.RLock()
+	calls = mock.calls.LinkExists
+	mock.lockLinkExists.RUnlock()
+	return calls
 }
 
 // Store calls StoreFunc.

@@ -19,3 +19,19 @@ type Response struct {
 	IncompleteResults bool   `json:"incomplete_results"`
 	Items             []Repo `json:"items"`
 }
+
+type Commit struct {
+	Files []struct {
+		Filename string `json:"filename"`
+	} `json:"files"`
+}
+
+type FileContent struct {
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+}
+
+type Issue struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}

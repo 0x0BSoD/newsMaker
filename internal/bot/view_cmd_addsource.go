@@ -36,7 +36,7 @@ func askTypeHandler(storage SourceStorage, b *botkit.Bot, chatID int64) botkit.V
 	return func(ctx context.Context, api *tgbotapi.BotAPI, update tgbotapi.Update) error {
 		name := update.Message.Text
 
-		msg := tgbotapi.NewMessage(chatID, "Выберите тип источника: rss или web")
+		msg := tgbotapi.NewMessage(chatID, "Выберите тип источника: rss, web, k8s-kep или k8s-cve")
 		if _, err := api.Send(msg); err != nil {
 			return err
 		}
@@ -49,9 +49,11 @@ func askTypeHandler(storage SourceStorage, b *botkit.Bot, chatID int64) botkit.V
 func askURLHandler(storage SourceStorage, b *botkit.Bot, chatID int64, name string) botkit.ViewFunc {
 	return func(ctx context.Context, api *tgbotapi.BotAPI, update tgbotapi.Update) error {
 		sourceType := update.Message.Text
-		if sourceType != model.SourceTypeRSS && sourceType != model.SourceTypeWeb {
+		switch sourceType {
+		case model.SourceTypeRSS, model.SourceTypeWeb, model.SourceTypeK8sKEP, model.SourceTypeK8sCVE:
+		default:
 			reply := tgbotapi.NewMessage(chatID,
-				fmt.Sprintf("Неверный тип %q. Введите rss или web:", sourceType))
+				fmt.Sprintf("Неверный тип %q. Введите rss, web, k8s-kep или k8s-cve:", sourceType))
 			_, _ = api.Send(reply)
 			b.RegisterMsgHandler(chatID, askURLHandler(storage, b, chatID, name))
 			return nil
@@ -81,7 +83,7 @@ func saveSourceHandler(storage SourceStorage, b *botkit.Bot, chatID int64, name,
 		}
 
 		switch sourceType {
-		case model.SourceTypeRSS:
+		case model.SourceTypeRSS, model.SourceTypeK8sKEP, model.SourceTypeK8sCVE:
 			probeClient := &http.Client{Timeout: feedProbeTimeout}
 			if _, err := rss.FetchByClient(feedURL, probeClient); err != nil {
 				reply := tgbotapi.NewMessage(chatID,
