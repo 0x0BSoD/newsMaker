@@ -80,6 +80,7 @@ func main() {
 		digestSummarizer     notifier.Summarizer
 		newsDigestSummarizer notifier.Summarizer
 		postSummarizer       notifier.Summarizer
+		reviewSummarizer     notifier.Summarizer
 	)
 
 	switch cfg.LLM.Type {
@@ -109,6 +110,13 @@ func main() {
 			cfg.LLM.Model,
 			cfg.LLM.Timeout,
 		)
+		reviewSummarizer = summary.NewOpenAISummarizer(
+			cfg.LLM.BaseURL,
+			cfg.LLM.Key,
+			cfg.Review.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
+		)
 		slog.Info("summarizers ready", "type", "openai", "model", cfg.LLM.Model)
 	default:
 		if cfg.LLM.BaseURL == "" {
@@ -133,7 +141,20 @@ func main() {
 			cfg.LLM.Model,
 			cfg.LLM.Timeout,
 		)
+		reviewSummarizer = summary.NewOllamaSummarizer(
+			cfg.LLM.BaseURL,
+			cfg.Review.Prompt,
+			cfg.LLM.Model,
+			cfg.LLM.Timeout,
+		)
 		slog.Info("summarizers ready", "type", "ollama", "model", cfg.LLM.Model)
+	}
+
+	if cfg.Review.Enabled {
+		digestSummarizer = summary.NewReviewed(digestSummarizer, reviewSummarizer)
+		newsDigestSummarizer = summary.NewReviewed(newsDigestSummarizer, reviewSummarizer)
+		postSummarizer = summary.NewReviewed(postSummarizer, reviewSummarizer)
+		slog.Info("LLM review stage enabled for all posts")
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

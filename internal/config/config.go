@@ -43,6 +43,10 @@ type Config struct {
 		MaxDataLen    int           `yaml:"max_data_len" env:"NEWS_DIGEST_MAX_DATA_LEN" default:"500"`
 		Prompt        string        `yaml:"prompt" env:"NEWS_DIGEST_PROMPT" default:"You are a tech news digest writer for a Telegram channel. Given articles grouped by topic and time of day, write an engaging news digest in Telegram HTML format. Start with 'Good morning!' or 'Good evening!' matching the time of day indicated in the input. Briefly introduce what is happening, then for each topic write a short bold header using <b>Topic</b> and list articles as bullet points using the format: • <a href='URL'>Title</a> — one sentence description. Keep it concise and friendly. Output only the final message text, no extra commentary."`
 	} `yaml:"news"`
+	Review struct {
+		Enabled bool   `yaml:"enabled" env:"REVIEW_ENABLED" default:"true"`
+		Prompt  string `yaml:"prompt" env:"REVIEW_PROMPT" default:"You are a meticulous copy editor for a Telegram channel. You receive a draft post. Verify it is valid Telegram HTML: only <b>, <strong>, <i>, <em>, <u>, <s>, <a href='URL'>, <code> and <pre> tags are allowed, every tag must be properly closed, and markdown, <br>, <p>, headers or list tags are forbidden — use plain newlines and • bullets instead. Fix any syntax problems, typos and awkward phrasing so the post reads well, but keep all links, facts and the overall structure intact and do not add new content. Output only the corrected message text, no commentary."`
+	} `yaml:"review"`
 	Post struct {
 		MaxContentLen int    `yaml:"max_content_len" env:"POST_MAX_CONTENT_LEN" default:"8000"`
 		Prompt        string `yaml:"prompt" env:"POST_PROMPT" default:"You are a tech editor for a Telegram channel. Given an article (URL, title, content) and an optional editor's note, write a short engaging post about it in Telegram HTML format: a bold one-line header using <b>, then 2-4 sentences summarizing the key points, weaving in the editor's note if present. Include a link to the article using <a href='URL'>. Keep it concise. Output only the final message text, no extra commentary."`
