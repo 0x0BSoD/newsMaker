@@ -7,7 +7,7 @@ import (
 )
 
 func TestResolveLink(t *testing.T) {
-	s := WebSource{BaseURL: "https://example.com"}
+	s := WebSource{baseURL: "https://example.com"}
 
 	assert.Equal(t, "https://other.com/x", s.resolveLink("https://other.com/x"))
 	assert.Equal(t, "https://example.com/blog/post", s.resolveLink("/blog/post"))

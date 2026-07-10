@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/0x0BSoD/newsMaker/internal/github"
-	"github.com/0x0BSoD/newsMaker/internal/storage"
+	"github.com/0x0BSoD/newsMaker/internal/model"
 )
 
 func TestDedup(t *testing.T) {
@@ -38,10 +38,10 @@ func TestIsReadable(t *testing.T) {
 
 func TestBuildSummaryInput(t *testing.T) {
 	prev := 100
-	newRepos := []storage.GitHubRepo{
+	newRepos := []model.GitHubRepo{
 		{FullName: "a/new", Stars: 42, Language: "Go", Description: "fresh"},
 	}
-	trending := []storage.GitHubRepo{
+	trending := []model.GitHubRepo{
 		{FullName: "b/hot", Stars: 150, StarsAtLastDigest: &prev, Description: "growing"},
 	}
 

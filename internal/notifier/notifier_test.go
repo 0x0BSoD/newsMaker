@@ -12,7 +12,7 @@ import (
 )
 
 func TestNextScheduledTime(t *testing.T) {
-	n := &Notifier{morningHour: 9, noonHour: 12, eveningHour: 18}
+	n := &Notifier{cfg: Config{MorningHour: 9, NoonHour: 12, EveningHour: 18}}
 
 	day := time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC)
 	at := func(hour int) time.Time { return day.Add(time.Duration(hour) * time.Hour) }
@@ -36,7 +36,7 @@ func TestNextScheduledTime(t *testing.T) {
 }
 
 func TestCurrentGreeting(t *testing.T) {
-	n := &Notifier{morningHour: 9, noonHour: 12, eveningHour: 18}
+	n := &Notifier{cfg: Config{MorningHour: 9, NoonHour: 12, EveningHour: 18}}
 
 	day := time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC)
 

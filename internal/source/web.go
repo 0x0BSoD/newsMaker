@@ -19,12 +19,12 @@ const defaultMaxArticles = 10
 // WebSource scrapes an HTML listing page, extracts article links with a CSS
 // selector, then enriches each article via a registered site-specific parser.
 type WebSource struct {
-	URL         string
-	SourceID    int64
-	SourceName  string
-	LinkSel     string
-	BaseURL     string
-	MaxArticles int
+	url         string
+	sourceID    int64
+	sourceName  string
+	linkSel     string
+	baseURL     string
+	maxArticles int
 }
 
 func NewWebSourceFromModel(m model.Source) (WebSource, error) {
@@ -36,17 +36,17 @@ func NewWebSourceFromModel(m model.Source) (WebSource, error) {
 		max = defaultMaxArticles
 	}
 	return WebSource{
-		URL:         m.FeedURL,
-		SourceID:    m.ID,
-		SourceName:  m.Name,
-		LinkSel:     m.ScraperConfig.LinkSelector,
-		BaseURL:     strings.TrimRight(m.ScraperConfig.BaseURL, "/"),
-		MaxArticles: max,
+		url:         m.FeedURL,
+		sourceID:    m.ID,
+		sourceName:  m.Name,
+		linkSel:     m.ScraperConfig.LinkSelector,
+		baseURL:     strings.TrimRight(m.ScraperConfig.BaseURL, "/"),
+		maxArticles: max,
 	}, nil
 }
 
-func (s WebSource) ID() int64    { return s.SourceID }
-func (s WebSource) Name() string { return s.SourceName }
+func (s WebSource) ID() int64    { return s.sourceID }
+func (s WebSource) Name() string { return s.sourceName }
 
 func (s WebSource) Fetch(ctx context.Context) ([]model.Item, error) {
 	urls, err := s.scrapeListingPage(ctx)
@@ -65,31 +65,31 @@ func (s WebSource) Fetch(ctx context.Context) ([]model.Item, error) {
 // scrapeListingPage fetches the listing URL and returns up to MaxArticles
 // unique article links matched by LinkSel.
 func (s WebSource) scrapeListingPage(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("web source %q: build request: %w", s.SourceName, err)
+		return nil, fmt.Errorf("web source %q: build request: %w", s.sourceName, err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; newsMaker-bot/1.0)")
 
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("web source %q: fetch listing: %w", s.SourceName, err)
+		return nil, fmt.Errorf("web source %q: fetch listing: %w", s.sourceName, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("web source %q: listing returned status %d", s.SourceName, resp.StatusCode)
+		return nil, fmt.Errorf("web source %q: listing returned status %d", s.sourceName, resp.StatusCode)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("web source %q: parse listing HTML: %w", s.SourceName, err)
+		return nil, fmt.Errorf("web source %q: parse listing HTML: %w", s.sourceName, err)
 	}
 
 	seen := make(map[string]bool)
 	var links []string
 
-	doc.Find(s.LinkSel).EachWithBreak(func(_ int, sel *goquery.Selection) bool {
+	doc.Find(s.linkSel).EachWithBreak(func(_ int, sel *goquery.Selection) bool {
 		href, exists := sel.Attr("href")
 		if !exists || href == "" {
 			return true
@@ -100,7 +100,7 @@ func (s WebSource) scrapeListingPage(ctx context.Context) ([]string, error) {
 		}
 		seen[link] = true
 		links = append(links, link)
-		return len(links) < s.MaxArticles
+		return len(links) < s.maxArticles
 	})
 
 	return links, nil
@@ -112,7 +112,7 @@ func (s WebSource) enrichArticle(ctx context.Context, link string) model.Item {
 	item := model.Item{
 		Link:       link,
 		Date:       time.Now().UTC(),
-		SourceName: s.SourceName,
+		SourceName: s.sourceName,
 	}
 
 	parser := sites.Find(link)
@@ -125,7 +125,7 @@ func (s WebSource) enrichArticle(ctx context.Context, link string) model.Item {
 	parsed, err := parser.Parse(ctx, link)
 	if err != nil {
 		// Degrade gracefully: store the URL with slug title so dedup still works.
-		slog.Warn("article enrichment failed", "source", s.SourceName, "link", link, "err", err)
+		slog.Warn("article enrichment failed", "source", s.sourceName, "link", link, "err", err)
 		item.Title = slugToTitle(link)
 		return item
 	}
@@ -140,13 +140,13 @@ func (s WebSource) resolveLink(href string) string {
 	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 		return href
 	}
-	if s.BaseURL == "" {
+	if s.baseURL == "" {
 		return href
 	}
 	if !strings.HasPrefix(href, "/") {
 		href = "/" + href
 	}
-	return s.BaseURL + href
+	return s.baseURL + href
 }
 
 // slugToTitle converts a URL path like "/blog/what-is-platform-engineering"

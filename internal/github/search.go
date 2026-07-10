@@ -10,9 +10,11 @@ import (
 	"time"
 )
 
-const GITHUB_API_ENDPOINT = "https://api.github.com"
-const MINIMUM_STARS = 500
-const RECENT_MINIMUM_STARS = 50
+const (
+	apiEndpoint        = "https://api.github.com"
+	minimumStars       = 500
+	recentMinimumStars = 50
+)
 
 type Client struct {
 	apikey     string
@@ -75,27 +77,27 @@ func (c *Client) search(ctx context.Context, query string) ([]Repo, error) {
 }
 
 // GetByTopic returns top repos for a topic sorted by stars descending.
-func (c *Client) GetByTopic(topic string) ([]Repo, error) {
+func (c *Client) GetByTopic(ctx context.Context, topic string) ([]Repo, error) {
 	requestUrl := fmt.Sprintf(
 		"%s/search/repositories?q=topic:%s+stars:>%d&sort=stars&order=desc&per_page=10",
-		GITHUB_API_ENDPOINT, topic, MINIMUM_STARS,
+		apiEndpoint, topic, minimumStars,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
 	return c.search(ctx, requestUrl)
 }
 
 // GetRecentByTopic returns repos created within the last `days` days with >50 stars, sorted by stars.
-func (c *Client) GetRecentByTopic(topic string, days int) ([]Repo, error) {
+func (c *Client) GetRecentByTopic(ctx context.Context, topic string, days int) ([]Repo, error) {
 	since := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 	requestUrl := fmt.Sprintf(
 		"%s/search/repositories?q=topic:%s+created:>%s+stars:>%d&sort=stars&order=desc&per_page=10",
-		GITHUB_API_ENDPOINT, topic, since, RECENT_MINIMUM_STARS,
+		apiEndpoint, topic, since, recentMinimumStars,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
 	return c.search(ctx, requestUrl)

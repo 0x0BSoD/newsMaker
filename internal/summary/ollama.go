@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ollama/ollama/api"
@@ -16,7 +15,6 @@ type OllamaSummarizer struct {
 	prompt  string
 	model   string
 	timeout time.Duration
-	mu      sync.Mutex
 }
 
 // CountTokens Simple estimation of token usage
@@ -42,9 +40,6 @@ func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *
 }
 
 func (o *OllamaSummarizer) Summarize(ctx context.Context, text string) (string, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
 	req := &api.GenerateRequest{
 		Model:  o.model,
 		System: o.prompt,

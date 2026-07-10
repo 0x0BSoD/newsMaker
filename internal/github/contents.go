@@ -33,7 +33,7 @@ func (c *Client) getJSON(ctx context.Context, url string, out any) error {
 
 // CommitFiles returns the paths of files changed by a commit.
 func (c *Client) CommitFiles(ctx context.Context, owner, repo, sha string) ([]string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/commits/%s", GITHUB_API_ENDPOINT, owner, repo, sha)
+	url := fmt.Sprintf("%s/repos/%s/%s/commits/%s", apiEndpoint, owner, repo, sha)
 
 	var commit Commit
 	if err := c.getJSON(ctx, url, &commit); err != nil {
@@ -49,7 +49,7 @@ func (c *Client) CommitFiles(ctx context.Context, owner, repo, sha string) ([]st
 
 // FileContent returns the decoded content of a file at path on the default branch.
 func (c *Client) FileContent(ctx context.Context, owner, repo, path string) ([]byte, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", GITHUB_API_ENDPOINT, owner, repo, path)
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", apiEndpoint, owner, repo, path)
 
 	var content FileContent
 	if err := c.getJSON(ctx, url, &content); err != nil {
@@ -66,7 +66,7 @@ func (c *Client) FileContent(ctx context.Context, owner, repo, path string) ([]b
 
 // Issue returns the title and body of an issue.
 func (c *Client) Issue(ctx context.Context, owner, repo string, number int) (string, string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d", GITHUB_API_ENDPOINT, owner, repo, number)
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d", apiEndpoint, owner, repo, number)
 
 	var issue Issue
 	if err := c.getJSON(ctx, url, &issue); err != nil {

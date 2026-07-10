@@ -48,6 +48,19 @@ type Source struct {
 	CreatedAt     time.Time
 }
 
+// GitHubRepo is a repository discovered via the GitHub topic search,
+// tracked across digests to detect new and trending repos.
+type GitHubRepo struct {
+	FullName          string
+	Topic             string
+	Stars             int
+	Language          string
+	Description       string
+	HTMLURL           string
+	StarsAtLastDigest *int      // nil if never posted; populated on read
+	FirstSeenAt       time.Time // populated on read
+}
+
 type Article struct {
 	ID          int64
 	SourceID    int64

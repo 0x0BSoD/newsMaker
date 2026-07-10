@@ -7,31 +7,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+
+	"github.com/0x0BSoD/newsMaker/internal/model"
 )
-
-type GitHubRepo struct {
-	FullName          string
-	Topic             string
-	Stars             int
-	Language          string
-	Description       string
-	HTMLURL           string
-	StarsAtLastDigest *int      // nil if never posted; populated on read
-	FirstSeenAt       time.Time // populated on read
-}
-
-type GitHubRepoStorage interface {
-	Upsert(ctx context.Context, repos []GitHubRepo) (newCount int, err error)
-	MarkPosted(ctx context.Context, fullNames []string) error
-	// LastPostedAt returns the most recent posted_at timestamp across all repos.
-	// The second return value is false if no repo has been posted yet.
-	LastPostedAt(ctx context.Context) (time.Time, bool, error)
-	// GetNewAndTrending returns repos new since `since` and repos whose star count
-	// grew by at least minGrowthPct (e.g. 0.30 for 30%) since the last digest.
-	// New repos have first_seen_at > since; trending repos are existing ones with
-	// significant star growth (requires stars_at_last_digest to be set).
-	GetNewAndTrending(ctx context.Context, topic string, since time.Time, minGrowthPct float64) (newRepos []GitHubRepo, trending []GitHubRepo, err error)
-}
 
 type GitHubRepoPostgresStorage struct {
 	db *sqlx.DB
@@ -43,7 +21,7 @@ func NewGitHubRepoStorage(db *sqlx.DB) *GitHubRepoPostgresStorage {
 
 // Upsert inserts new repos and updates last_seen_at, stars, language, and description
 // for existing ones. Returns the count of repos that were inserted for the first time.
-func (s *GitHubRepoPostgresStorage) Upsert(ctx context.Context, repos []GitHubRepo) (int, error) {
+func (s *GitHubRepoPostgresStorage) Upsert(ctx context.Context, repos []model.GitHubRepo) (int, error) {
 	if len(repos) == 0 {
 		return 0, nil
 	}
@@ -148,7 +126,7 @@ func (s *GitHubRepoPostgresStorage) LastPostedAt(ctx context.Context) (time.Time
 // and (stars - stars_at_last_digest) / stars_at_last_digest >= minGrowthPct.
 func (s *GitHubRepoPostgresStorage) GetNewAndTrending(
 	ctx context.Context, topic string, since time.Time, minGrowthPct float64,
-) ([]GitHubRepo, []GitHubRepo, error) {
+) ([]model.GitHubRepo, []model.GitHubRepo, error) {
 	conn, err := s.db.Connx(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -191,8 +169,8 @@ func (s *GitHubRepoPostgresStorage) GetNewAndTrending(
 		return nil, nil, fmt.Errorf("query trending repos: %w", err)
 	}
 
-	toRepo := func(r row) GitHubRepo {
-		return GitHubRepo{
+	toRepo := func(r row) model.GitHubRepo {
+		return model.GitHubRepo{
 			FullName:          r.FullName,
 			Topic:             topic,
 			Stars:             r.Stars,
@@ -204,11 +182,11 @@ func (s *GitHubRepoPostgresStorage) GetNewAndTrending(
 		}
 	}
 
-	newRepos := make([]GitHubRepo, len(newRows))
+	newRepos := make([]model.GitHubRepo, len(newRows))
 	for i, r := range newRows {
 		newRepos[i] = toRepo(r)
 	}
-	trending := make([]GitHubRepo, len(trendingRows))
+	trending := make([]model.GitHubRepo, len(trendingRows))
 	for i, r := range trendingRows {
 		trending[i] = toRepo(r)
 	}

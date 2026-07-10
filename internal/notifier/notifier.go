@@ -28,53 +28,40 @@ type Summarizer interface {
 }
 
 type Notifier struct {
-	articles        ArticleProvider
-	summarizer      Summarizer
-	bot             *tgbotapi.BotAPI
-	reporter        *reporter.Reporter
-	channelID       int64
-	morningHour     int
-	noonHour        int
-	eveningHour     int
-	lookback        time.Duration
-	maxArticles     int
-	retryInterval   time.Duration
-	maxRetries      int
-	summaryInputDir string
-	maxInputDataLen int
+	articles   ArticleProvider
+	summarizer Summarizer
+	bot        *tgbotapi.BotAPI
+	reporter   *reporter.Reporter
+	cfg        Config
+}
+
+// Config holds the scheduling and digest-building parameters for a Notifier.
+type Config struct {
+	ChannelID       int64
+	MorningHour     int
+	NoonHour        int
+	EveningHour     int
+	Lookback        time.Duration
+	MaxArticles     int
+	RetryInterval   time.Duration
+	MaxRetries      int
+	SummaryInputDir string
+	MaxInputDataLen int
 }
 
 func New(
 	articleProvider ArticleProvider,
 	summarizer Summarizer,
 	bot *tgbotapi.BotAPI,
-	morningHour int,
-	noonHour int,
-	eveningHour int,
-	lookback time.Duration,
-	maxArticles int,
-	channelID int64,
 	rep *reporter.Reporter,
-	retryInterval time.Duration,
-	maxRetries int,
-	summaryInputDir string,
-	maxInputDataLen int,
+	cfg Config,
 ) *Notifier {
 	return &Notifier{
-		articles:        articleProvider,
-		summarizer:      summarizer,
-		bot:             bot,
-		reporter:        rep,
-		channelID:       channelID,
-		morningHour:     morningHour,
-		noonHour:        noonHour,
-		eveningHour:     eveningHour,
-		lookback:        lookback,
-		maxArticles:     maxArticles,
-		retryInterval:   retryInterval,
-		maxRetries:      maxRetries,
-		summaryInputDir: summaryInputDir,
-		maxInputDataLen: maxInputDataLen,
+		articles:   articleProvider,
+		summarizer: summarizer,
+		bot:        bot,
+		reporter:   rep,
+		cfg:        cfg,
 	}
 }
 
@@ -97,23 +84,23 @@ func (n *Notifier) Start(ctx context.Context) error {
 // sendWithRetry attempts SendDigest up to maxRetries times, waiting
 // retryInterval between attempts. Stops early if ctx is cancelled.
 func (n *Notifier) sendWithRetry(ctx context.Context, greeting string) {
-	for attempt := 1; attempt <= n.maxRetries; attempt++ {
+	for attempt := 1; attempt <= n.cfg.MaxRetries; attempt++ {
 		err := n.SendDigest(ctx, greeting)
 		if err == nil {
 			return
 		}
 
-		slog.Error("digest send failed", "err", err, "attempt", attempt, "maxRetries", n.maxRetries)
-		n.reporter.Notify(fmt.Sprintf("Digest error (attempt %d/%d): %v", attempt, n.maxRetries, err))
+		slog.Error("digest send failed", "err", err, "attempt", attempt, "maxRetries", n.cfg.MaxRetries)
+		n.reporter.Notify(fmt.Sprintf("Digest error (attempt %d/%d): %v", attempt, n.cfg.MaxRetries, err))
 
-		if attempt == n.maxRetries {
+		if attempt == n.cfg.MaxRetries {
 			slog.Error("digest failed after all retries, giving up", "slot", greeting)
 			return
 		}
 
-		slog.Info("retrying digest", "in", n.retryInterval, "nextAttempt", attempt+1)
+		slog.Info("retrying digest", "in", n.cfg.RetryInterval, "nextAttempt", attempt+1)
 		select {
-		case <-time.After(n.retryInterval):
+		case <-time.After(n.cfg.RetryInterval):
 		case <-ctx.Done():
 			return
 		}
@@ -130,9 +117,9 @@ func (n *Notifier) nextScheduledTime(now time.Time) (time.Time, string) {
 		t        time.Time
 		greeting string
 	}{
-		{time.Date(y, m, d, n.morningHour, 0, 0, 0, loc), "morning"},
-		{time.Date(y, m, d, n.noonHour, 0, 0, 0, loc), "afternoon"},
-		{time.Date(y, m, d, n.eveningHour, 0, 0, 0, loc), "evening"},
+		{time.Date(y, m, d, n.cfg.MorningHour, 0, 0, 0, loc), "morning"},
+		{time.Date(y, m, d, n.cfg.NoonHour, 0, 0, 0, loc), "afternoon"},
+		{time.Date(y, m, d, n.cfg.EveningHour, 0, 0, 0, loc), "evening"},
 	}
 
 	for _, c := range candidates {
@@ -144,11 +131,11 @@ func (n *Notifier) nextScheduledTime(now time.Time) (time.Time, string) {
 	// All of today's slots have passed — return tomorrow's morning.
 	tomorrow := now.AddDate(0, 0, 1)
 	ty, tm, td := tomorrow.Date()
-	return time.Date(ty, tm, td, n.morningHour, 0, 0, 0, loc), "morning"
+	return time.Date(ty, tm, td, n.cfg.MorningHour, 0, 0, 0, loc), "morning"
 }
 
 func (n *Notifier) SendDigest(ctx context.Context, greeting string) error {
-	return n.send(ctx, greeting, n.channelID, true)
+	return n.send(ctx, greeting, n.cfg.ChannelID, true)
 }
 
 // SendTestDigest sends a digest to channelID without marking articles as
@@ -160,15 +147,15 @@ func (n *Notifier) SendTestDigest(ctx context.Context, channelID int64) error {
 // Repost sends a digest to the production channel and marks articles as posted.
 // Intended for manual recovery after all automatic retry attempts have failed.
 func (n *Notifier) Repost(ctx context.Context) error {
-	return n.send(ctx, n.currentGreeting(time.Now()), n.channelID, true)
+	return n.send(ctx, n.currentGreeting(time.Now()), n.cfg.ChannelID, true)
 }
 
 func (n *Notifier) currentGreeting(now time.Time) string {
 	h := now.Hour()
 	switch {
-	case h < n.noonHour:
+	case h < n.cfg.NoonHour:
 		return "morning"
-	case h < n.eveningHour:
+	case h < n.cfg.EveningHour:
 		return "afternoon"
 	default:
 		return "evening"
@@ -176,8 +163,8 @@ func (n *Notifier) currentGreeting(now time.Time) string {
 }
 
 func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, markPosted bool) error {
-	since := time.Now().Add(-n.lookback)
-	articles, err := n.articles.AllNotPosted(ctx, since, uint64(n.maxArticles))
+	since := time.Now().Add(-n.cfg.Lookback)
+	articles, err := n.articles.AllNotPosted(ctx, since, uint64(n.cfg.MaxArticles))
 	if err != nil {
 		return fmt.Errorf("fetch articles: %w", err)
 	}
@@ -190,9 +177,9 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 	slog.Info("building digest", "articles", len(articles), "slot", greeting, "channel", channelID, "markPosted", markPosted)
 
 	grouped := groupByTheme(articles)
-	digestInput := buildDigestInput(greeting, grouped, n.maxInputDataLen)
+	digestInput := buildDigestInput(greeting, grouped, n.cfg.MaxInputDataLen)
 
-	writeSummaryInput(n.summaryInputDir, "digest.txt", digestInput)
+	writeSummaryInput(n.cfg.SummaryInputDir, "digest.txt", digestInput)
 
 	tokens, err := n.summarizer.CountTokens(digestInput)
 	if err != nil {
@@ -210,7 +197,7 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 		}
 		digestText = buildSimpleDigest(greeting, grouped)
 	} else {
-		writeSummaryInput(n.summaryInputDir, "digest_output.txt", digestText)
+		writeSummaryInput(n.cfg.SummaryInputDir, "digest_output.txt", digestText)
 		digestText = markup.SanitizeTelegramHTML(digestText)
 	}
 
@@ -289,10 +276,8 @@ func buildDigestInput(greeting string, grouped map[string][]model.Article, maxDa
 		sb.WriteString(fmt.Sprintf("Topic: %s\n", theme))
 		for _, a := range grouped[theme] {
 			summary := a.Summary
-			if len(summary) > maxDataLen {
-				if r := []rune(summary); len(r) > maxDataLen {
-					summary = string(r[:maxDataLen]) + "..."
-				}
+			if r := []rune(summary); len(r) > maxDataLen {
+				summary = string(r[:maxDataLen]) + "..."
 			}
 			if summary != "" {
 				sb.WriteString(fmt.Sprintf("- %s <%s> — %s\n", a.Title, a.Link, summary))

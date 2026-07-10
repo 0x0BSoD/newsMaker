@@ -13,16 +13,16 @@ import (
 
 	"github.com/0x0BSoD/newsMaker/internal/botkit/markup"
 	"github.com/0x0BSoD/newsMaker/internal/github"
-	"github.com/0x0BSoD/newsMaker/internal/storage"
+	"github.com/0x0BSoD/newsMaker/internal/model"
 	"github.com/0x0BSoD/newsMaker/internal/telegraph"
 )
 
 // RepoStorage is satisfied by storage.GitHubRepoPostgresStorage.
 type RepoStorage interface {
-	Upsert(ctx context.Context, repos []storage.GitHubRepo) (newCount int, err error)
+	Upsert(ctx context.Context, repos []model.GitHubRepo) (newCount int, err error)
 	MarkPosted(ctx context.Context, fullNames []string) error
 	LastPostedAt(ctx context.Context) (time.Time, bool, error)
-	GetNewAndTrending(ctx context.Context, topic string, since time.Time, minGrowthPct float64) (newRepos []storage.GitHubRepo, trending []storage.GitHubRepo, err error)
+	GetNewAndTrending(ctx context.Context, topic string, since time.Time, minGrowthPct float64) (newRepos []model.GitHubRepo, trending []model.GitHubRepo, err error)
 }
 
 // Summarizer is satisfied by the Ollama / OpenAI summarizer implementations.
@@ -89,8 +89,8 @@ func (d *Digest) Start(ctx context.Context) error {
 
 type topicResult struct {
 	topic    string
-	newRepos []storage.GitHubRepo
-	trending []storage.GitHubRepo
+	newRepos []model.GitHubRepo
+	trending []model.GitHubRepo
 	pageURL  string
 	summary  string
 }
@@ -155,12 +155,12 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 	)
 
 	for _, topic := range d.topics {
-		topRepos, err := d.gh.GetByTopic(topic)
+		topRepos, err := d.gh.GetByTopic(ctx, topic)
 		if err != nil {
 			slog.Error("GetByTopic failed", "topic", topic, "err", err)
 		}
 
-		recentRepos, err := d.gh.GetRecentByTopic(topic, 7)
+		recentRepos, err := d.gh.GetRecentByTopic(ctx, topic, 7)
 		if err != nil {
 			slog.Error("GetRecentByTopic failed", "topic", topic, "err", err)
 		}
@@ -170,8 +170,8 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 
 		// Upsert all fetched repos so star counts and language are up to date.
 		all := dedup(topRepos, recentRepos)
-		storageRepos := toStorageRepos(all, topic)
-		if _, err := d.storage.Upsert(ctx, storageRepos); err != nil {
+		modelRepos := toModelRepos(all, topic)
+		if _, err := d.storage.Upsert(ctx, modelRepos); err != nil {
 			slog.Error("upsert repos failed", "topic", topic, "err", err)
 		}
 		for _, r := range all {
@@ -306,7 +306,7 @@ func buildTelegramMessage(results []topicResult, totalNew, totalTrending int, ha
 	return sb.String()
 }
 
-func buildSummaryInput(topic string, newRepos, trending []storage.GitHubRepo) string {
+func buildSummaryInput(topic string, newRepos, trending []model.GitHubRepo) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Topic: %s\n", topic))
 
@@ -383,10 +383,10 @@ func dedup(top, recent []github.Repo) []github.Repo {
 	return result
 }
 
-func toStorageRepos(repos []github.Repo, topic string) []storage.GitHubRepo {
-	out := make([]storage.GitHubRepo, len(repos))
+func toModelRepos(repos []github.Repo, topic string) []model.GitHubRepo {
+	out := make([]model.GitHubRepo, len(repos))
 	for i, r := range repos {
-		out[i] = storage.GitHubRepo{
+		out[i] = model.GitHubRepo{
 			FullName:    r.FullName,
 			Topic:       topic,
 			Stars:       r.StargazersCount,
@@ -398,7 +398,7 @@ func toStorageRepos(repos []github.Repo, topic string) []storage.GitHubRepo {
 	return out
 }
 
-func repoLine(r storage.GitHubRepo) string {
+func repoLine(r model.GitHubRepo) string {
 	lang := r.Language
 	if lang == "" {
 		lang = "unknown"
@@ -406,7 +406,7 @@ func repoLine(r storage.GitHubRepo) string {
 	return fmt.Sprintf("%s ⭐%d | %s", r.FullName, r.Stars, lang)
 }
 
-func repoItem(r storage.GitHubRepo, extra string) telegraph.Node {
+func repoItem(r model.GitHubRepo, extra string) telegraph.Node {
 	linkText := repoLine(r)
 	if extra != "" {
 		linkText += " " + extra
@@ -439,7 +439,7 @@ func writeSummaryInput(dir, filename, content string) {
 	}
 }
 
-func buildTopicNodes(topic string, newRepos, trending []storage.GitHubRepo) []telegraph.Node {
+func buildTopicNodes(topic string, newRepos, trending []model.GitHubRepo) []telegraph.Node {
 	var nodes []telegraph.Node
 
 	// New repos section
