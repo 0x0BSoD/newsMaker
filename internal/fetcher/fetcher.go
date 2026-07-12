@@ -41,7 +41,9 @@ type Fetcher struct {
 	articles ArticleStorage
 	sources  SourcesProvider
 	reporter *reporter.Reporter
-	github   src.GitHubClient
+	// github is passed to source constructors that need GitHub API access
+	// (KEPSource, CVESource); Fetcher itself never calls it.
+	github src.GitHubClient
 
 	fetchInterval  time.Duration
 	filterKeywords []string

@@ -30,7 +30,8 @@ type Config struct {
 	Digest struct {
 		Enabled  bool          `yaml:"enabled" env:"DIGEST_ENABLED" default:"false"`
 		Interval time.Duration `yaml:"interval" env:"DIGEST_INTERVAL" default:"168h"`
-		Prompt   string        `yaml:"prompt" env:"DIGEST_SUMMARY_PROMPT" default:"Summarize these GitHub repositories in 2-3 sentences, highlighting key trends and notable projects:"`
+		TopCount int           `yaml:"top_count" env:"DIGEST_TOP_COUNT" default:"5"`
+		Prompt   string        `yaml:"prompt" env:"DIGEST_SUMMARY_PROMPT" default:"You write a weekly trending GitHub digest in Russian for a Telegram channel. You receive a list of repositories with name, URL, stars, weekly star growth, language, topic and description. Write the post in Telegram HTML: start with one short friendly Russian intro sentence about this week's theme, then for each repository a bullet: • <a href='URL'>owner/repo</a> followed on the next line by a 1-2 sentence Russian description of what the project does. Keep repository names, product names and technical terms in English. Use only <b>, <i>, <a href>, <code> tags, plain newlines, no markdown. Output only the final message text, no extra commentary."`
 	} `yaml:"digest"`
 	News struct {
 		MorningHour   int           `yaml:"morning_hour" env:"NEWS_DIGEST_MORNING_HOUR" default:"9"`
@@ -86,6 +87,8 @@ func load(c *Config, configPath string) error {
 	return loader.Load()
 }
 
+// Get loads and returns the configuration. configPath is used only on the
+// first call; subsequent calls return the cached result regardless of path.
 func Get(configPath string) (Config, error) {
 	once.Do(func() {
 		loadErr = load(&cfg, configPath)

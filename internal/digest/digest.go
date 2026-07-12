@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/0x0BSoD/newsMaker/internal/botkit/markup"
 	"github.com/0x0BSoD/newsMaker/internal/github"
 	"github.com/0x0BSoD/newsMaker/internal/model"
+	"github.com/0x0BSoD/newsMaker/internal/summary"
 	"github.com/0x0BSoD/newsMaker/internal/telegraph"
 )
 
@@ -25,22 +25,22 @@ type RepoStorage interface {
 	GetNewAndTrending(ctx context.Context, topic string, since time.Time, minGrowthPct float64) (newRepos []model.GitHubRepo, trending []model.GitHubRepo, err error)
 }
 
-// Summarizer is satisfied by the Ollama / OpenAI summarizer implementations.
-type Summarizer interface {
-	Summarize(ctx context.Context, text string) (string, error)
-	CountTokens(text string) (int, error)
+// Config holds the non-dependency settings for a Digest.
+type Config struct {
+	ChannelID       int64
+	Topics          []string
+	Interval        time.Duration
+	TopCount        int
+	SummaryInputDir string
 }
 
 type Digest struct {
-	gh              *github.Client
-	tph             *telegraph.Client
-	bot             *tgbotapi.BotAPI
-	storage         RepoStorage
-	summarizer      Summarizer
-	channelID       int64
-	topics          []string
-	interval        time.Duration
-	summaryInputDir string
+	gh         *github.Client
+	tph        *telegraph.Client
+	bot        *tgbotapi.BotAPI
+	storage    RepoStorage
+	summarizer summary.Summarizer
+	cfg        Config
 }
 
 func New(
@@ -48,22 +48,16 @@ func New(
 	tph *telegraph.Client,
 	bot *tgbotapi.BotAPI,
 	storage RepoStorage,
-	summarizer Summarizer,
-	channelID int64,
-	topics []string,
-	interval time.Duration,
-	summaryInputDir string,
+	summarizer summary.Summarizer,
+	cfg Config,
 ) *Digest {
 	return &Digest{
-		gh:              gh,
-		tph:             tph,
-		bot:             bot,
-		storage:         storage,
-		summarizer:      summarizer,
-		channelID:       channelID,
-		topics:          topics,
-		interval:        interval,
-		summaryInputDir: summaryInputDir,
+		gh:         gh,
+		tph:        tph,
+		bot:        bot,
+		storage:    storage,
+		summarizer: summarizer,
+		cfg:        cfg,
 	}
 }
 
@@ -72,7 +66,7 @@ func (d *Digest) Start(ctx context.Context) error {
 		slog.Error("digest run failed", "err", err)
 	}
 
-	ticker := time.NewTicker(d.interval)
+	ticker := time.NewTicker(d.cfg.Interval)
 	defer ticker.Stop()
 
 	for {
@@ -92,7 +86,6 @@ type topicResult struct {
 	newRepos []model.GitHubRepo
 	trending []model.GitHubRepo
 	pageURL  string
-	summary  string
 }
 
 const (
@@ -101,7 +94,7 @@ const (
 )
 
 func (d *Digest) run(ctx context.Context) error {
-	if len(d.topics) == 0 {
+	if len(d.cfg.Topics) == 0 {
 		slog.Warn("no topics configured, skipping digest")
 		return nil
 	}
@@ -118,20 +111,20 @@ func (d *Digest) run(ctx context.Context) error {
 		return nil
 	}
 
-	return d.send(ctx, d.channelID, true)
+	return d.send(ctx, d.cfg.ChannelID, true)
 }
 
 // RunTest sends a digest to channelID without marking repos as posted, so the
 // production cooldown and post state are not affected.
 func (d *Digest) RunTest(ctx context.Context, channelID int64) error {
-	if len(d.topics) == 0 {
+	if len(d.cfg.Topics) == 0 {
 		return fmt.Errorf("no topics configured")
 	}
 	return d.send(ctx, channelID, false)
 }
 
 func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) error {
-	slog.Info("running github digest", "topics", d.topics, "channel", channelID, "markPosted", markPosted)
+	slog.Info("running github digest", "topics", d.cfg.Topics, "channel", channelID, "markPosted", markPosted)
 
 	// Determine the baseline time for delta computation.
 	lastPosted, hasLastPosted, err := d.storage.LastPostedAt(ctx)
@@ -145,16 +138,12 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 	// since == zero means "no previous digest" → all repos will appear as new.
 
 	var (
-		results       []topicResult
-		totalNew      int
-		totalTrending int
+		results []topicResult
 		// allFullNames collects every repo seen this run for MarkPosted.
-		allFullNames      []string
-		trendingInputBuf  strings.Builder
-		trendingOutputBuf strings.Builder
+		allFullNames []string
 	)
 
-	for _, topic := range d.topics {
+	for _, topic := range d.cfg.Topics {
 		topRepos, err := d.gh.GetByTopic(ctx, topic)
 		if err != nil {
 			slog.Error("GetByTopic failed", "topic", topic, "err", err)
@@ -184,10 +173,8 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 			slog.Error("GetNewAndTrending failed", "topic", topic, "err", err)
 		}
 
-		// Nothing changed for this topic — skip the Telegraph page and the
-		// LLM call, buildTelegramMessage omits empty topics anyway.
+		// Nothing changed for this topic — skip the Telegraph page.
 		if len(newRepos) == 0 && len(trending) == 0 {
-			results = append(results, topicResult{topic: topic})
 			continue
 		}
 
@@ -200,37 +187,31 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 			pageURL = ""
 		}
 
-		// AI summary of changes.
-		summaryInput := buildSummaryInput(topic, newRepos, trending)
-		trendingInputBuf.WriteString(summaryInput)
-		trendingInputBuf.WriteString("\n---\n\n")
-		summary, err := d.summarizer.Summarize(ctx, summaryInput)
-		if err != nil {
-			slog.Error("summarize failed", "topic", topic, "err", err)
-			summary = ""
-		}
-		trendingOutputBuf.WriteString(fmt.Sprintf("### %s\n\n%s\n\n---\n\n", topic, summary))
-
 		results = append(results, topicResult{
 			topic:    topic,
 			newRepos: newRepos,
 			trending: trending,
 			pageURL:  pageURL,
-			summary:  summary,
 		})
-		totalNew += len(newRepos)
-		totalTrending += len(trending)
 	}
 
-	writeSummaryInput(d.summaryInputDir, "trending.txt", trendingInputBuf.String())
-	writeSummaryInput(d.summaryInputDir, "trending_output.txt", trendingOutputBuf.String())
-
-	msgData := buildTelegramMessage(results, totalNew, totalTrending, hasLastPosted)
-	if msgData == "empty" {
-		slog.Warn("buildTelegramMessage empty message")
-		// Basically it is not an error, so just return
+	top := selectTopRepos(results, d.cfg.TopCount)
+	if len(top) == 0 {
+		slog.Info("no new or trending repos this week, skipping digest")
 		return nil
 	}
+
+	// One LLM call for the whole post: intro + per-repo Russian blurbs.
+	input := buildWeeklyTopInput(top)
+	summary.WriteDebugFile(d.cfg.SummaryInputDir, "trending.txt", input)
+	post, err := d.summarizer.Summarize(ctx, input)
+	if err != nil {
+		slog.Error("summarize failed, falling back to plain repo list", "err", err)
+		post = ""
+	}
+	summary.WriteDebugFile(d.cfg.SummaryInputDir, "trending_output.txt", post)
+
+	msgData := buildTelegramMessage(post, top, results)
 	chunks := markup.SplitMessage(msgData, markup.TelegramMessageLimit)
 	for _, chunk := range chunks {
 		if len(chunks) > 1 {
@@ -267,78 +248,79 @@ func (d *Digest) send(ctx context.Context, channelID int64, markPosted bool) err
 	return nil
 }
 
-func buildTelegramMessage(results []topicResult, totalNew, totalTrending int, hasLastPosted bool) string {
+// weeklyDelta is the star gain since the last digest. Repos without a
+// snapshot (new this week) count all their stars.
+// ponytail: favors big new arrivals over steady growers; tune if the top
+// list gets dominated by old repos newly matching the search.
+func weeklyDelta(r model.GitHubRepo) int {
+	if r.StarsAtLastDigest != nil && *r.StarsAtLastDigest > 0 {
+		return r.Stars - *r.StarsAtLastDigest
+	}
+	return r.Stars
+}
+
+// selectTopRepos pools new and trending repos across all topics, dedups by
+// full name, and returns the n repos with the biggest weekly star delta.
+func selectTopRepos(results []topicResult, n int) []model.GitHubRepo {
+	seen := make(map[string]bool)
+	var pool []model.GitHubRepo
+	for _, res := range results {
+		for _, r := range slices.Concat(res.newRepos, res.trending) {
+			if !seen[r.FullName] {
+				seen[r.FullName] = true
+				pool = append(pool, r)
+			}
+		}
+	}
+	slices.SortFunc(pool, func(a, b model.GitHubRepo) int {
+		return weeklyDelta(b) - weeklyDelta(a)
+	})
+	if n > 0 && len(pool) > n {
+		pool = pool[:n]
+	}
+	return pool
+}
+
+// buildWeeklyTopInput renders the top repos as LLM input for the weekly post.
+func buildWeeklyTopInput(repos []model.GitHubRepo) string {
 	var sb strings.Builder
-
-	if hasLastPosted {
-		sb.WriteString(fmt.Sprintf(
-			"<b>GitHub Digest — Week of %s</b>\n\n%d new repos, %d trending across all topics.\n",
-			time.Now().Format("2006-01-02"), totalNew, totalTrending,
-		))
-	} else {
-		sb.WriteString(fmt.Sprintf(
-			"<b>GitHub Digest — %s (first run)</b>\n\n%d repos discovered across all topics.\n",
-			time.Now().Format("2006-01-02"), totalNew,
-		))
-	}
-
-	lenResults := len(results)
-	var resultsMissCounter int
-	for _, r := range results {
-		if len(r.newRepos) == 0 && len(r.trending) == 0 {
-			// sb.WriteString(fmt.Sprintf("\n<b>%s:</b> no changes this week\n", r.topic))
-			resultsMissCounter++
-			continue
+	sb.WriteString("Top GitHub repositories this week:\n")
+	for _, r := range repos {
+		lang := r.Language
+		if lang == "" {
+			lang = "unknown"
 		}
-		sb.WriteString(fmt.Sprintf("\n<b>%s:</b> %d new, %d trending\n", r.topic, len(r.newRepos), len(r.trending)))
-		if r.summary != "" {
-			sb.WriteString(markup.SanitizeTelegramHTML(r.summary) + "\n")
-		}
-		if r.pageURL != "" {
-			sb.WriteString(fmt.Sprintf("\n<a href=\"%s\">View on Telegraph</a>\n", r.pageURL))
-		}
+		sb.WriteString(fmt.Sprintf("- %s | %s | %d stars (+%d this week) | %s | topic: %s\n  %s\n",
+			r.FullName, r.HTMLURL, r.Stars, weeklyDelta(r), lang, r.Topic, r.Description))
 	}
-
-	if resultsMissCounter == lenResults {
-		return "empty"
-	}
-
 	return sb.String()
 }
 
-func buildSummaryInput(topic string, newRepos, trending []model.GitHubRepo) string {
+// buildTelegramMessage assembles the weekly post: the LLM-written body (or a
+// plain repo list when the LLM failed) plus Telegraph links per topic.
+func buildTelegramMessage(post string, top []model.GitHubRepo, results []topicResult) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Topic: %s\n", topic))
 
-	if len(newRepos) > 0 {
-		sb.WriteString("\nNew repos:\n")
-		for _, r := range newRepos {
-			lang := r.Language
-			if lang == "" {
-				lang = "unknown"
+	if post != "" {
+		sb.WriteString(markup.SanitizeTelegramHTML(post))
+	} else {
+		sb.WriteString(fmt.Sprintf("<b>GitHub Digest — Week of %s</b>\n", time.Now().Format("2006-01-02")))
+		for _, r := range top {
+			sb.WriteString(fmt.Sprintf("\n• <a href=\"%s\">%s</a> ⭐%d (+%d)\n", r.HTMLURL, r.FullName, r.Stars, weeklyDelta(r)))
+			if r.Description != "" {
+				sb.WriteString(r.Description + "\n")
 			}
-			sb.WriteString(fmt.Sprintf("- %s (%d stars, %s): %s\n", r.FullName, r.Stars, lang, r.Description))
 		}
 	}
 
-	if len(trending) > 0 {
-		sb.WriteString("\nTrending (significant star growth):\n")
-		for _, r := range trending {
-			lang := r.Language
-			if lang == "" {
-				lang = "unknown"
-			}
-			prev := 0
-			if r.StarsAtLastDigest != nil {
-				prev = *r.StarsAtLastDigest
-			}
-			var growthStr string
-			if prev > 0 {
-				pct := float64(r.Stars-prev) / float64(prev) * 100
-				growthStr = fmt.Sprintf("+%.0f%%", pct)
-			}
-			sb.WriteString(fmt.Sprintf("- %s (%d stars %s, %s): %s\n", r.FullName, r.Stars, growthStr, lang, r.Description))
+	var links []string
+	for _, r := range results {
+		if r.pageURL != "" {
+			links = append(links, fmt.Sprintf("<a href=\"%s\">%s</a>", r.pageURL, r.topic))
 		}
+	}
+	if len(links) > 0 {
+		sb.WriteString("\n\nПодробнее: " + strings.Join(links, " · "))
 	}
 
 	return sb.String()
@@ -428,15 +410,6 @@ func repoItem(r model.GitHubRepo, extra string) telegraph.Node {
 		)
 	}
 	return telegraph.Node{Tag: "li", Children: children}
-}
-
-// writeSummaryInput saves the LLM input text to a file in dir for inspection.
-// Errors are logged but do not affect the digest flow.
-func writeSummaryInput(dir, filename, content string) {
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		slog.Warn("failed to write summary input file", "path", path, "err", err)
-	}
 }
 
 func buildTopicNodes(topic string, newRepos, trending []model.GitHubRepo) []telegraph.Node {

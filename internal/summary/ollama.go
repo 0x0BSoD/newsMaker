@@ -10,7 +10,7 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
-type OllamaSummarizer struct {
+type ollamaSummarizer struct {
 	client  *api.Client
 	prompt  string
 	model   string
@@ -18,12 +18,15 @@ type OllamaSummarizer struct {
 }
 
 // CountTokens Simple estimation of token usage
-func (o *OllamaSummarizer) CountTokens(text string) (int, error) {
+func (o *ollamaSummarizer) CountTokens(text string) (int, error) {
 	return estimateTokens(text)
 }
 
-func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *OllamaSummarizer {
-	httpClient := &http.Client{}
+// NewOllamaSummarizer creates a summarizer backed by a local Ollama server.
+func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) Summarizer {
+	// The context deadline in Summarize covers the request, but the client
+	// timeout bounds connection establishment even without a deadline.
+	httpClient := &http.Client{Timeout: timeout}
 
 	c := api.NewClient(&url.URL{
 		Scheme: "http",
@@ -31,7 +34,7 @@ func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *
 		Path:   "/",
 	}, httpClient)
 
-	return &OllamaSummarizer{
+	return &ollamaSummarizer{
 		client:  c,
 		prompt:  prompt,
 		model:   model,
@@ -39,7 +42,7 @@ func NewOllamaSummarizer(baseURL, prompt, model string, timeout time.Duration) *
 	}
 }
 
-func (o *OllamaSummarizer) Summarize(ctx context.Context, text string) (string, error) {
+func (o *ollamaSummarizer) Summarize(ctx context.Context, text string) (string, error) {
 	req := &api.GenerateRequest{
 		Model:  o.model,
 		System: o.prompt,
