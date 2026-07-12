@@ -24,6 +24,8 @@ type Parser interface {
 	Parse(ctx context.Context, articleURL string) (Article, error)
 }
 
+// registry is populated exclusively by init() functions before main runs.
+// It must not be modified after program startup (reads are unsynchronized).
 var registry []Parser
 
 func register(p Parser) {

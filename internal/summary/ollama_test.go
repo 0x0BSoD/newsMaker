@@ -42,8 +42,8 @@ func TestCountTokens(t *testing.T) {
 	for name, s := range map[string]interface {
 		CountTokens(text string) (int, error)
 	}{
-		"ollama": &OllamaSummarizer{},
-		"openai": &OpenAISummarizer{},
+		"ollama": &ollamaSummarizer{},
+		"openai": &openAISummarizer{},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tokens, err := s.CountTokens("hello world, this is a token counting test")

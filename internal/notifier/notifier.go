@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +13,7 @@ import (
 	"github.com/0x0BSoD/newsMaker/internal/botkit/markup"
 	"github.com/0x0BSoD/newsMaker/internal/model"
 	"github.com/0x0BSoD/newsMaker/internal/reporter"
+	"github.com/0x0BSoD/newsMaker/internal/summary"
 )
 
 type ArticleProvider interface {
@@ -22,14 +21,9 @@ type ArticleProvider interface {
 	MarkAsPosted(ctx context.Context, articleIDs []int64) error
 }
 
-type Summarizer interface {
-	Summarize(ctx context.Context, text string) (string, error)
-	CountTokens(text string) (int, error)
-}
-
 type Notifier struct {
 	articles   ArticleProvider
-	summarizer Summarizer
+	summarizer summary.Summarizer
 	bot        *tgbotapi.BotAPI
 	reporter   *reporter.Reporter
 	cfg        Config
@@ -51,7 +45,7 @@ type Config struct {
 
 func New(
 	articleProvider ArticleProvider,
-	summarizer Summarizer,
+	summarizer summary.Summarizer,
 	bot *tgbotapi.BotAPI,
 	rep *reporter.Reporter,
 	cfg Config,
@@ -179,7 +173,7 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 	grouped := groupByTheme(articles)
 	digestInput := buildDigestInput(greeting, grouped, n.cfg.MaxInputDataLen)
 
-	writeSummaryInput(n.cfg.SummaryInputDir, "digest.txt", digestInput)
+	summary.WriteDebugFile(n.cfg.SummaryInputDir, "digest.txt", digestInput)
 
 	tokens, err := n.summarizer.CountTokens(digestInput)
 	if err != nil {
@@ -197,7 +191,7 @@ func (n *Notifier) send(ctx context.Context, greeting string, channelID int64, m
 		}
 		digestText = buildSimpleDigest(greeting, grouped)
 	} else {
-		writeSummaryInput(n.cfg.SummaryInputDir, "digest_output.txt", digestText)
+		summary.WriteDebugFile(n.cfg.SummaryInputDir, "digest_output.txt", digestText)
 		digestText = markup.SanitizeTelegramHTML(digestText)
 	}
 
@@ -289,15 +283,6 @@ func buildDigestInput(greeting string, grouped map[string][]model.Article, maxDa
 	}
 
 	return sb.String()
-}
-
-// writeSummaryInput saves the LLM input text to a file in dir for inspection.
-// Errors are logged but do not affect the digest flow.
-func writeSummaryInput(dir, filename, content string) {
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		slog.Warn("failed to write summary input file", "path", path, "err", err)
-	}
 }
 
 // buildSimpleDigest is a plain HTML fallback when the LLM is unavailable.

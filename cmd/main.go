@@ -77,10 +77,10 @@ func main() {
 	repoStorage := storage.NewGitHubRepoStorage(db)
 
 	var (
-		digestSummarizer     notifier.Summarizer
-		newsDigestSummarizer notifier.Summarizer
-		postSummarizer       notifier.Summarizer
-		reviewSummarizer     notifier.Summarizer
+		digestSummarizer     summary.Summarizer
+		newsDigestSummarizer summary.Summarizer
+		postSummarizer       summary.Summarizer
+		reviewSummarizer     summary.Summarizer
 	)
 
 	switch cfg.LLM.Type {
@@ -279,10 +279,13 @@ func main() {
 			botAPI,
 			repoStorage,
 			digestSummarizer,
-			cfg.Telegram.ChannelID,
-			cfg.GitHub.Topics,
-			cfg.Digest.Interval,
-			summaryInputDir,
+			digest.Config{
+				ChannelID:       cfg.Telegram.ChannelID,
+				Topics:          cfg.GitHub.Topics,
+				Interval:        cfg.Digest.Interval,
+				TopCount:        cfg.Digest.TopCount,
+				SummaryInputDir: summaryInputDir,
+			},
 		)
 		newsBot.RegisterCmdView(
 			"testdigest",

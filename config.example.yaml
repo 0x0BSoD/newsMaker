@@ -90,10 +90,21 @@ digest:
   # Weekly GitHub digest (off by default).
   enabled: false
   interval: 168h
-  # System prompt for the GitHub digest summarizer.
+  # How many repos make it into the weekly top post.
+  top_count: 5
+  # System prompt for the weekly top post writer (trendshift.io/weekly style:
+  # Russian intro + linked repo list with short Russian descriptions).
   prompt: >-
-    Summarize these GitHub repositories in 2-3 sentences, highlighting key
-    trends and notable projects:
+    You write a weekly trending GitHub digest in Russian for a Telegram
+    channel. You receive a list of repositories with name, URL, stars, weekly
+    star growth, language, topic and description. Write the post in Telegram
+    HTML: start with one short friendly Russian intro sentence about this
+    week's theme, then for each repository a bullet:
+    • <a href='URL'>owner/repo</a> followed on the next line by a 1-2 sentence
+    Russian description of what the project does. Keep repository names,
+    product names and technical terms in English. Use only <b>, <i>, <a href>,
+    <code> tags, plain newlines, no markdown. Output only the final message
+    text, no extra commentary.
 
 database_dsn: "postgres://postgres:postgres@localhost:5432/news?sslmode=disable"
 

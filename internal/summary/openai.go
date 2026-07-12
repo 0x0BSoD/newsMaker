@@ -8,7 +8,7 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
-type OpenAISummarizer struct {
+type openAISummarizer struct {
 	client  *openai.Client
 	prompt  string
 	model   string
@@ -16,19 +16,19 @@ type OpenAISummarizer struct {
 }
 
 // CountTokens Simple estimation of token usage
-func (o *OpenAISummarizer) CountTokens(text string) (int, error) {
+func (o *openAISummarizer) CountTokens(text string) (int, error) {
 	return estimateTokens(text)
 }
 
 // NewOpenAISummarizer creates a summarizer backed by any OpenAI-compatible API.
 // Set baseURL to a non-empty string to point at a local server (LM Studio,
 // llama.cpp, Ollama's /v1 endpoint, etc.); leave empty for api.openai.com.
-func NewOpenAISummarizer(baseURL, apiKey, prompt, model string, timeout time.Duration) *OpenAISummarizer {
+func NewOpenAISummarizer(baseURL, apiKey, prompt, model string, timeout time.Duration) Summarizer {
 	cfg := openai.DefaultConfig(apiKey)
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
 	}
-	return &OpenAISummarizer{
+	return &openAISummarizer{
 		client:  openai.NewClientWithConfig(cfg),
 		prompt:  prompt,
 		model:   model,
@@ -36,7 +36,7 @@ func NewOpenAISummarizer(baseURL, apiKey, prompt, model string, timeout time.Dur
 	}
 }
 
-func (o *OpenAISummarizer) Summarize(ctx context.Context, text string) (string, error) {
+func (o *openAISummarizer) Summarize(ctx context.Context, text string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
 
