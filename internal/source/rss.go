@@ -4,6 +4,7 @@ package source
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -14,15 +15,20 @@ import (
 	"github.com/0x0BSoD/newsMaker/internal/model"
 )
 
-// contextTransport injects a context into every outgoing request so that
-// context cancellation and deadlines propagate through the rss library.
+const feedUserAgent = "Mozilla/5.0 (compatible; Feedfetcher-Google; +http://www.google.com/feedfetcher.html)"
+
+// contextTransport injects a context and User-Agent into every outgoing
+// request so that context cancellation, deadlines, and feed server
+// bot-detection heuristics are handled correctly.
 type contextTransport struct {
 	ctx  context.Context
 	base http.RoundTripper
 }
 
 func (t contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return t.base.RoundTrip(req.WithContext(t.ctx))
+	req = req.WithContext(t.ctx)
+	req.Header.Set("User-Agent", feedUserAgent)
+	return t.base.RoundTrip(req)
 }
 
 type RSSSource struct {
@@ -81,7 +87,21 @@ func (s RSSSource) loadFeed(ctx context.Context, url string) (*rss.Feed, error) 
 		Transport: contextTransport{ctx: ctx, base: base},
 		Timeout:   30 * time.Second,
 	}
-	return rss.FetchByClient(url, client)
+
+	fetchFunc := func(u string) (*http.Response, error) {
+		resp, err := client.Get(u)
+		if err != nil {
+			return nil, err
+		}
+		ct := resp.Header.Get("Content-Type")
+		if strings.Contains(ct, "text/html") {
+			resp.Body.Close()
+			return nil, fmt.Errorf("server returned HTML instead of feed (status %d, Content-Type: %s) — may be blocking bots or requiring auth; URL: %s", resp.StatusCode, ct, u)
+		}
+		return resp, nil
+	}
+
+	return rss.FetchByFunc(fetchFunc, url)
 }
 
 func (s RSSSource) ID() int64 {
