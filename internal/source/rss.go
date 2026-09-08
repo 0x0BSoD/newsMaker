@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -29,6 +30,33 @@ func (t contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.WithContext(t.ctx)
 	req.Header.Set("User-Agent", feedUserAgent)
 	return t.base.RoundTrip(req)
+}
+
+// xmlSanitizingReadCloser removes ASCII control characters forbidden by XML
+// 1.0. Some otherwise valid feeds contain these characters in article text;
+// encoding/xml rejects the entire document when it encounters one.
+type xmlSanitizingReadCloser struct {
+	body io.ReadCloser
+}
+
+func (r *xmlSanitizingReadCloser) Read(p []byte) (int, error) {
+	for {
+		n, err := r.body.Read(p)
+		kept := 0
+		for _, b := range p[:n] {
+			if b >= 0x20 || b == '\t' || b == '\n' || b == '\r' {
+				p[kept] = b
+				kept++
+			}
+		}
+		if kept > 0 || err != nil || len(p) == 0 {
+			return kept, err
+		}
+	}
+}
+
+func (r *xmlSanitizingReadCloser) Close() error {
+	return r.body.Close()
 }
 
 type RSSSource struct {
@@ -98,6 +126,8 @@ func (s RSSSource) loadFeed(ctx context.Context, url string) (*rss.Feed, error) 
 			resp.Body.Close()
 			return nil, fmt.Errorf("server returned HTML instead of feed (status %d, Content-Type: %s) — may be blocking bots or requiring auth; URL: %s", resp.StatusCode, ct, u)
 		}
+		resp.Body = &xmlSanitizingReadCloser{body: resp.Body}
+		resp.ContentLength = -1
 		return resp, nil
 	}
 
